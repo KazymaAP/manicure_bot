@@ -1,0 +1,24 @@
+
+services:
+  bot:
+    build: .
+    container_name: manicure_bot_v4
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - bot_data:/app/data
+    environment:
+      - DB_PATH=/app/data/manicure_bot.db
+
+  # Раскомментируйте если используете Redis FSM Storage
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: manicure_bot_redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis_data:/data
+
+volumes:
+  bot_data:
+  # redis_data:

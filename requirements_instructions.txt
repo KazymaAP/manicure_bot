@@ -1,0 +1,1090 @@
+================================================================================
+**ОБЪЕДИНЕННАЯ ИНСТРУКЦИЯ ДЛЯ AI-ИСПОЛНИТЕЛЯ — Manicure Bot v4 (FULL)**
+================================================================================
+
+Версия: 2.0  
+Целевой проект: `manicure_bot` (Telegram-бот записи на маникюр, Python 3.10+, aiogram 3.x)  
+Применить все изменения к исходному коду проекта.  
+Каждый шаг атомарен. Выполнять строго в порядке нумерации.
+
+================================================================================
+**ШАГ 0. ПОДГОТОВКА**
+================================================================================
+
+0.1. Создать резервную копию проекта:
+```bash
+cp -r manicure_bot manicure_bot_backup_$(date +%Y%m%d_%H%M%S)
+```
+
+0.2. Убедиться, что зависимости установлены:
+```bash
+cd manicure_bot
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+0.3. **НЕМЕДЛЕННО отозвать токен бота** (скомпрометированный токен `8701029014:AAGyv6U5vGFmoXgLHdFsfoHzrRQ1tTUw9lA`):
+   — Открыть Telegram → @BotFather → /mybots → выбрать бота → API Token → Revoke
+   — Получить новый токен и записать его в `.env`
+
+0.4. Удалить реальные данные из репозитория:
+```bash
+rm -f bot.log
+rm -f data/manicure_bot.db
+touch data/.gitkeep
+```
+
+0.5. Убедиться, что Python 3.10+ (нужны `slots=True` в dataclass):
+```bash
+python --version
+```
+
+================================================================================
+**ШАГ 1. ИСПРАВЛЕНИЕ КРИТИЧЕСКИХ БАГОВ (PRIORITY CRITICAL)**
+================================================================================
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-01 + L-05: Очистить .env и .env.example от реальных секретов**
+──────────────────────────────────────────────────────────
+
+**Файл: `.env`** – ПОЛНОЕ СОДЕРЖИМОЕ (заменить целиком):
+```ini
+# ── Обязательные ──────────────────────────────────────────────────────────
+BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+
+# ── Администраторы (Telegram ID через запятую) ─────────────────────────────
+ADMIN_IDS=YOUR_TELEGRAM_ID_HERE
+
+# ── База данных ────────────────────────────────────────────────────────────
+DB_PATH=data/manicure_bot.db
+
+# ── Напоминания ────────────────────────────────────────────────────────────
+REMINDER_HOURS_BEFORE=24
+
+# ── Ограничения ─────────────────────────────────────────────────────────────
+MAX_APPOINTMENTS_PER_USER=3
+
+# ── Канал мастера ─────────────────────────────────────────────────────────
+REQUIRED_CHANNEL=
+SCHEDULE_CHANNEL_ID=-1
+CHANNEL_ID=
+CHANNEL_LINK=
+PORTFOLIO_URL=
+
+# ── Redis для FSM (если не задано — используется MemoryStorage) ────────────
+# REDIS_URL=redis://localhost:6379/0
+
+# ── Логирование ────────────────────────────────────────────────────────────
+LOG_LEVEL=INFO
+LOG_FILE=bot.log
+```
+
+**Файл: `.env.example`** – ПОЛНОЕ СОДЕРЖИМОЕ (заменить целиком):
+```ini
+# ══════════════════════════════════════════════════════════════════════════
+# Manicure Bot v4 — Пример конфигурации
+# Скопируйте этот файл в .env и заполните своими значениями
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── ОБЯЗАТЕЛЬНЫЕ ПАРАМЕТРЫ ─────────────────────────────────────────────────
+BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+ADMIN_IDS=YOUR_TELEGRAM_ID_HERE
+
+# ── НАСТРОЙКИ КАНАЛА (заполните если используете проверку подписки) ────────
+REQUIRED_CHANNEL=
+SCHEDULE_CHANNEL_ID=-1
+CHANNEL_ID=
+CHANNEL_LINK=
+PORTFOLIO_URL=
+
+# ── НЕОБЯЗАТЕЛЬНЫЕ ПАРАМЕТРЫ ────────────────────────────────────────────────
+DB_PATH=data/manicure_bot.db
+REMINDER_HOURS_BEFORE=24
+MAX_APPOINTMENTS_PER_USER=3
+# REDIS_URL=redis://localhost:6379/0
+LOG_LEVEL=INFO
+LOG_FILE=bot.log
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-02: Исправить неверное исключение при достижении лимита записей**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/application/services/appointment_service.py`**
+
+В блоке импортов найти:
+```python
+from src.domain.exceptions import (
+    AppointmentNotFoundError,
+    AppointmentAlreadyExistsError,
+    SlotAlreadyBookedError,
+)
+```
+Заменить на:
+```python
+from src.domain.exceptions import (
+    AppointmentNotFoundError,
+    AppointmentAlreadyExistsError,
+    SlotAlreadyBookedError,
+    MaxAppointmentsReachedError,
+)
+```
+
+Затем найти строку:
+```python
+        if active_count >= self._max_per_user:
+            raise AppointmentAlreadyExistsError(dto.user_id)
+```
+Заменить на:
+```python
+        if active_count >= self._max_per_user:
+            raise MaxAppointmentsReachedError(self._max_per_user)
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-03 / H-10: Исправить несоответствие callback_data в calendar**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/handlers/user_handler.py`**
+
+Найти:
+```python
+    @router.callback_query(BookingFSM.choosing_date, F.data == "cal_empty")
+    async def calendar_empty(callback: CallbackQuery) -> None:
+```
+Заменить на:
+```python
+    @router.callback_query(BookingFSM.choosing_date, F.data == "calendar_ignore")
+    async def calendar_empty(callback: CallbackQuery) -> None:
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-04: Полностью переписать AppointmentService (удалить дубли, мёртвый код)**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/application/services/appointment_service.py`** – ПОЛНОСТЬЮ ЗАМЕНИТЬ на следующий код:
+
+```python
+"""
+src/application/services/appointment_service.py — Сервис записей.
+Бизнес-логика создания, отмены и просмотра записей клиентов.
+Все методы синхронные (БД — синхронный sqlite3).
+"""
+from __future__ import annotations
+
+import logging
+from datetime import date, timedelta
+from typing import Optional
+
+from src.domain.models.appointment import Appointment
+from src.domain.exceptions import (
+    AppointmentNotFoundError,
+    AppointmentAlreadyExistsError,
+    SlotAlreadyBookedError,
+    MaxAppointmentsReachedError,
+)
+from src.application.dto.booking_dto import CreateBookingDTO, BookingResultDTO
+from src.infrastructure.repositories.appointment_repository import AppointmentRepository
+from src.infrastructure.repositories.schedule_repository import ScheduleRepository
+
+logger = logging.getLogger(__name__)
+
+
+class AppointmentService:
+    def __init__(
+        self,
+        appointment_repo: AppointmentRepository,
+        schedule_repo: ScheduleRepository,
+        max_per_user: int = 1,
+    ) -> None:
+        self._appointment_repo = appointment_repo
+        self._schedule_repo = schedule_repo
+        self._max_per_user = max_per_user
+
+    def create_booking(self, dto: CreateBookingDTO) -> BookingResultDTO:
+        active_count = self._appointment_repo.count_active_by_user_id(dto.user_id)
+        if active_count >= self._max_per_user:
+            raise MaxAppointmentsReachedError(self._max_per_user)
+
+        booked = self._schedule_repo.book_slot(dto.date, dto.time)
+        if not booked:
+            raise SlotAlreadyBookedError(dto.date, dto.time)
+
+        appointment = Appointment(
+            user_id=dto.user_id,
+            username=dto.username,
+            client_name=dto.client_name,
+            phone=dto.phone,
+            date=dto.date,
+            time=dto.time,
+            comment=dto.comment,
+        )
+        appointment_id = self._appointment_repo.create(appointment)
+        logger.info("Booking created: id=%s user_id=%s", appointment_id, dto.user_id)
+        return BookingResultDTO(
+            appointment_id=appointment_id,
+            client_name=dto.client_name,
+            date=dto.date,
+            time=dto.time,
+        )
+
+    def create_appointment(
+        self,
+        user_telegram_id: int,
+        date_str: str,
+        time_str: str,
+        client_name: str,
+        phone: str,
+        comment: Optional[str] = None,
+        username: Optional[str] = None,
+    ) -> int:
+        dto = CreateBookingDTO(
+            user_id=user_telegram_id,
+            username=username,
+            client_name=client_name,
+            phone=phone,
+            date=date_str,
+            time=time_str,
+            comment=comment,
+        )
+        result = self.create_booking(dto)
+        return result.appointment_id
+
+    def cancel_by_user(self, user_id: int) -> Optional[Appointment]:
+        appointment = self._appointment_repo.get_active_by_user_id(user_id)
+        if not appointment:
+            return None
+        return self._do_cancel(appointment)
+
+    def cancel_by_id(self, appointment_id: int) -> Optional[Appointment]:
+        appointment = self._appointment_repo.get_by_id(appointment_id)
+        if not appointment:
+            raise AppointmentNotFoundError(appointment_id)
+        if appointment.is_cancelled:
+            return None
+        return self._do_cancel(appointment)
+
+    def cancel_appointment(self, appointment_id: int, user_id: int) -> Optional[Appointment]:
+        appointment = self._appointment_repo.get_by_id(appointment_id)
+        if not appointment or appointment.user_id != user_id:
+            raise AppointmentNotFoundError(appointment_id)
+        return self._do_cancel(appointment)
+
+    def admin_cancel_appointment(self, appointment_id: int) -> Optional[Appointment]:
+        return self.cancel_by_id(appointment_id)
+
+    def _do_cancel(self, appointment: Appointment) -> Appointment:
+        self._appointment_repo.cancel(appointment.id)
+        self._schedule_repo.release_slot(appointment.date, appointment.time)
+        appointment.cancel()
+        logger.info("Appointment cancelled: id=%s", appointment.id)
+        return appointment
+
+    def get_active_appointment(self, user_id: int) -> Optional[Appointment]:
+        return self._appointment_repo.get_active_by_user_id(user_id)
+
+    def get_user_appointments(self, user_id: int) -> list[Appointment]:
+        active = self._appointment_repo.get_active_by_user_id(user_id)
+        return [active] if active else []
+
+    def get_upcoming_unreminded(self) -> list[Appointment]:
+        return self._appointment_repo.get_upcoming_unreminded()
+
+    def mark_reminder_sent(self, appointment_id: int) -> None:
+        self._appointment_repo.mark_reminder_sent(appointment_id)
+
+    async def get_appointment_by_id(self, appointment_id: int) -> Optional[Appointment]:
+        return self._appointment_repo.get_by_id(appointment_id)
+
+    async def get_appointments_filtered(self, filter_key: str) -> list[Appointment]:
+        today_str = date.today().isoformat()
+        if filter_key == "today":
+            return self._appointment_repo.get_by_date(today_str)
+        elif filter_key == "week":
+            week_end = (date.today() + timedelta(days=7)).isoformat()
+            return self._appointment_repo.get_by_date_range(today_str, week_end)
+        elif filter_key == "active":
+            return self._appointment_repo.get_all_active()
+        else:
+            return self._appointment_repo.get_all()
+
+    async def get_statistics(self) -> dict:
+        today_str = date.today().isoformat()
+        week_end = (date.today() + timedelta(days=7)).isoformat()
+        all_appts = self._appointment_repo.get_all()
+        today_appts = self._appointment_repo.get_by_date(today_str)
+        week_appts = self._appointment_repo.get_by_date_range(today_str, week_end)
+        confirmed = [a for a in all_appts if a.is_active]
+        cancelled = [a for a in all_appts if a.is_cancelled]
+        return {
+            "total": len(all_appts),
+            "confirmed": len(confirmed),
+            "cancelled": len(cancelled),
+            "today": len(today_appts),
+            "week": len(week_appts),
+        }
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-04 дополнение: добавить `get_active_appointments_by_user_id` в репозиторий**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/infrastructure/repositories/appointment_repository.py`**
+
+После метода `get_active_by_user_id()` добавить:
+```python
+    def get_active_appointments_by_user_id(self, user_id: int) -> list[Appointment]:
+        """Возвращает ВСЕ активные записи пользователя (не только первую)."""
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM appointments
+                WHERE user_id = ? AND is_cancelled = 0
+                ORDER BY date, time
+                """,
+                (user_id,),
+            ).fetchall()
+        return [Appointment.from_row(dict(row)) for row in rows]
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-05: Исправить двойной callback.answer() в confirm_booking**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/handlers/user_handler.py`**
+
+Заменить весь блок `confirm_booking` на:
+```python
+    @router.callback_query(BookingFSM.confirming, F.data == "booking_confirm")
+    async def confirm_booking(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_id = callback.from_user.id
+        answered = False
+        try:
+            appointment_id = await appt_service.create_appointment(
+                user_telegram_id=user_id,
+                date_str=data["chosen_date"],
+                time_str=data["chosen_time"],
+                client_name=data["client_name"],
+                phone=data["phone"],
+                comment=data.get("comment"),
+            )
+            # Уведомить администратора и запланировать напоминание
+            await notification_service.notify_admin_new_booking(appointment_id)
+            reminder_service.schedule_reminder(
+                appointment_id=appointment_id,
+                user_id=user_id,
+                date_str=data["chosen_date"],
+                time_str=data["chosen_time"],
+            )
+            await state.clear()
+            is_admin = user_id in settings.admin_ids
+            await callback.message.edit_text(
+                MessageFormatter.booking_success(data["chosen_date"], data["chosen_time"]),
+                parse_mode="HTML",
+            )
+            await callback.message.answer(
+                "Главное меню:",
+                reply_markup=MainMenuKeyboard.main(is_admin=is_admin),
+            )
+            await callback.answer()
+            answered = True
+        except SlotAlreadyBookedError:
+            await callback.answer(MessageFormatter.slot_already_taken(), show_alert=True)
+            answered = True
+        except MaxAppointmentsReachedError as e:
+            await callback.answer(MessageFormatter.max_appointments_reached(e.max_count), show_alert=True)
+            answered = True
+        except Exception as exc:
+            logger.error("Ошибка создания записи для %s: %s", user_id, exc)
+            await callback.answer(MessageFormatter.error_general(), show_alert=True)
+            answered = True
+        finally:
+            if not answered:
+                try:
+                    await callback.answer()
+                except Exception:
+                    pass
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-05 дополнение: исправить `my_appointments` – добавить `await`**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/handlers/user_handler.py`**
+
+Найти:
+```python
+    @router.message(F.text == "📋 Мои записи")
+    async def my_appointments(message: Message) -> None:
+        user_id = message.from_user.id
+        appointments = appt_service.get_user_appointments(user_id)
+```
+Заменить на:
+```python
+    @router.message(F.text == "📋 Мои записи")
+    async def my_appointments(message: Message) -> None:
+        user_id = message.from_user.id
+        appointments = await appt_service.get_user_appointments(user_id)
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ C-06: Синхронизировать `migrations/001_initial.sql` со схемой кода**
+──────────────────────────────────────────────────────────
+
+**Файл: `migrations/001_initial.sql`** – ПОЛНОЕ СОДЕРЖИМОЕ:
+```sql
+-- migrations/001_initial.sql
+-- Начальная схема базы данных Manicure Bot
+
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -8000;
+PRAGMA temp_store = MEMORY;
+
+CREATE TABLE IF NOT EXISTS working_days (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    date      TEXT    NOT NULL UNIQUE,
+    is_closed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_working_days_date ON working_days(date);
+
+CREATE TABLE IF NOT EXISTS time_slots (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    date      TEXT    NOT NULL,
+    time      TEXT    NOT NULL,
+    is_booked INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(date, time)
+);
+CREATE INDEX IF NOT EXISTS idx_time_slots_date ON time_slots(date);
+CREATE INDEX IF NOT EXISTS idx_time_slots_free ON time_slots(date, is_booked);
+
+CREATE TABLE IF NOT EXISTS appointments (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL,
+    username      TEXT,
+    client_name   TEXT    NOT NULL,
+    phone         TEXT    NOT NULL,
+    date          TEXT    NOT NULL,
+    time          TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL,
+    reminder_sent INTEGER NOT NULL DEFAULT 0,
+    is_cancelled  INTEGER NOT NULL DEFAULT 0,
+    comment       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_appointments_user_id ON appointments(user_id);
+CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
+CREATE INDEX IF NOT EXISTS idx_appointments_active ON appointments(user_id, is_cancelled);
+```
+
+================================================================================
+**ШАГ 2. ИСПРАВЛЕНИЕ HIGH-ПРИОРИТЕТНЫХ ПРОБЛЕМ**
+================================================================================
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-02: Убрать N+1 запросов в `get_available_dates`**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/infrastructure/repositories/schedule_repository.py`**
+
+Добавить метод:
+```python
+    def get_available_dates_in_range(self, from_date: str, to_date: str) -> set[str]:
+        """Возвращает множество дат, на которые есть хотя бы один свободный слот."""
+        with self._db.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT ts.date
+                FROM time_slots ts
+                JOIN working_days wd ON wd.date = ts.date
+                WHERE ts.date BETWEEN ? AND ?
+                  AND ts.is_booked = 0
+                  AND wd.is_closed = 0
+                ORDER BY ts.date
+                """,
+                (from_date, to_date),
+            ).fetchall()
+        return {row["date"] for row in rows}
+```
+
+**Файл: `src/application/services/schedule_service.py`**
+
+Заменить метод `get_available_dates`:
+```python
+    def get_available_dates(self, from_date: date, days_ahead: int) -> set[str]:
+        to_date = from_date + timedelta(days=days_ahead)
+        return self._schedule_repo.get_available_dates_in_range(
+            from_date.isoformat(), to_date.isoformat()
+        )
+```
+Удалить дублирующий метод `_sync_get_available_dates` (если есть).
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-08: Вынести хардкодный текст уведомления в MessageFormatter**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/formatters/message_formatter.py`**
+
+Добавить в конец класса:
+```python
+    @staticmethod
+    def admin_cancel_notification_to_client(date_str: str, time_str: str) -> str:
+        return f"❌ Ваша запись на {date_str} в {time_str} была отменена администратором.\n\nЕсли есть вопросы — обратитесь к мастеру."
+```
+
+**Файл: `src/presentation/handlers/admin_handler.py`**
+
+Найти блок уведомления клиента и заменить на:
+```python
+            if appt:
+                try:
+                    await callback.bot.send_message(
+                        appt.user_id,
+                        MessageFormatter.admin_cancel_notification_to_client(appt.date, appt.time),
+                        parse_mode="HTML",
+                    )
+                except Exception as notify_exc:
+                    logger.warning("Не удалось уведомить клиента %s: %s", appt.user_id, notify_exc)
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-09: Удалить дублирующий метод `appointments_filter` в AdminKeyboard**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/keyboards/admin.py`**
+
+Найти **первое** определение `appointments_filter` (примерно строки 34-40) и **удалить его**. Оставить только второе определение (в конце класса). Во втором определении добавить кнопку "Назад":
+
+```python
+    @staticmethod
+    def appointments_filter() -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="📅 Сегодня", callback_data="admin_filter:today"))
+        builder.row(InlineKeyboardButton(text="📆 За неделю", callback_data="admin_filter:week"))
+        builder.row(
+            InlineKeyboardButton(text="✅ Активные", callback_data="admin_filter:active"),
+            InlineKeyboardButton(text="📋 Все", callback_data="admin_filter:all"),
+        )
+        builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_main"))
+        return builder.as_markup()
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-05: Добавить обработчик кнопки "⚙️ Админ-панель"**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/handlers/admin_handler.py`**
+
+После `cmd_admin` добавить:
+```python
+    @router.message(F.text == "⚙️ Админ-панель")
+    async def btn_admin_panel(message: Message) -> None:
+        if not _is_admin(message.from_user.id):
+            await message.answer(MessageFormatter.admin_not_authorized())
+            return
+        await message.answer(
+            MessageFormatter.admin_welcome(),
+            reply_markup=AdminKeyboard.main_menu(),
+            parse_mode="HTML",
+        )
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-01: Исправить пустой except при уведомлении клиента об отмене**
+──────────────────────────────────────────────────────────
+
+Уже выполнено в H-08 (добавлено логирование).
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-02 (доп.): Логировать ошибки транзакций в DatabaseManager**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/infrastructure/database/connection.py`**
+
+В методе `transaction()` заменить:
+```python
+        except Exception as exc:
+            logger.error("Transaction rolled back due to error: %s", exc, exc_info=True)
+            conn.rollback()
+            raise
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-03: Убрать дублирующийся метод `appointments_filter`** – уже сделан.
+──────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-07: Заменить `assert` на `RuntimeError` в dependencies.py**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/config/dependencies.py`**
+
+Все `assert` вида:
+```python
+assert self._db is not None, "..."
+```
+заменить на:
+```python
+if self._db is None:
+    raise RuntimeError("Database not initialized. Call initialize() first.")
+```
+Аналогично для `_appointment_service`, `_schedule_service`, `_notification_service`, `_reminder_service`.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-09: Вынести `import re` на уровень модуля в admin_handler.py**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/handlers/admin_handler.py`**
+
+В начало файла добавить `import re`. Затем удалить все `import re` внутри функций.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-12: Уточнить `except` в репозитории расписания**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/infrastructure/repositories/schedule_repository.py`**
+
+Добавить `import sqlite3` в начало файла. Заменить все голые `except Exception:` на конкретные `sqlite3.IntegrityError` и логирование.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-13: Исправить Dockerfile CMD**
+──────────────────────────────────────────────────────────
+
+**Файл: `Dockerfile`**
+
+Заменить:
+```dockerfile
+CMD ["python", "-m", "main"]
+```
+на:
+```dockerfile
+CMD ["python", "main.py"]
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-06: Удалить aiosqlite из requirements.txt**
+──────────────────────────────────────────────────────────
+
+**Файл: `requirements.txt`**
+
+Закомментировать или удалить строку `aiosqlite==0.20.0`.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ H-13 (M-09): Передать `log_file` в `setup_logging` из main.py**
+──────────────────────────────────────────────────────────
+
+**Файл: `main.py`**
+
+Заменить:
+```python
+setup_logging(settings.log_level)
+```
+на:
+```python
+setup_logging(settings.log_level, settings.log_file)
+```
+
+**Файл: `src/config/logging_config.py`**
+
+Заменить:
+```python
+def setup_logging(log_level: str = "INFO", log_file: Optional[str] = "bot.log") -> None:
+```
+на:
+```python
+def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> None:
+```
+
+================================================================================
+**ШАГ 3. ОПТИМИЗАЦИЯ И ЭФФЕКТИВНОСТЬ**
+================================================================================
+
+──────────────────────────────────────────────────────────
+**ПАТЧ OPT-01: Перенести imports из тел функций на уровень модуля**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/handlers/user_handler.py`**
+
+В начало файла добавить:
+```python
+import calendar as _cal
+from datetime import date as _date
+```
+Удалить такие же импорты из тела `start_booking`.
+
+**Файл: `src/presentation/handlers/admin_handler.py`**
+
+Добавить `import re` в начале (уже сделано).
+
+──────────────────────────────────────────────────────────
+**ПАТЧ OPT-02: Добавить уведомление администратора и планирование напоминания после записи**
+──────────────────────────────────────────────────────────
+
+Уже включено в обновлённый `confirm_booking` (см. ПАТЧ C-05).
+
+──────────────────────────────────────────────────────────
+**ПАТЧ M-08: Исправить навигацию по месяцам в календаре (переход года)**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/handlers/user_handler.py`**
+
+Заменить функцию `calendar_navigate` на:
+```python
+    @router.callback_query(BookingFSM.choosing_date, F.data.startswith("cal_prev:") | F.data.startswith("cal_next:"))
+    async def calendar_navigate(callback: CallbackQuery, state: FSMContext) -> None:
+        from datetime import date as _date
+        parts = callback.data.split(":")
+        direction = parts[0]
+        year, month = int(parts[1]), int(parts[2])
+
+        if direction == "cal_prev":
+            month -= 1
+            if month < 1:
+                month = 12
+                year -= 1
+        else:  # cal_next
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+        today = _date.today()
+        if year < today.year or (year == today.year and month < today.month):
+            await callback.answer()
+            return
+
+        available_dates = await sched_service.get_available_dates_async()
+        cal = CalendarKeyboard.build(
+            year=year,
+            month=month,
+            available_dates=set(available_dates),
+        )
+        await callback.message.edit_reply_markup(reply_markup=cal)
+        await callback.answer()
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ M-06: Удалить дублирующийся `_sync_get_available_dates` из schedule_service.py**
+──────────────────────────────────────────────────────────
+
+Если метод существует – удалить.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ M-05: Устранить конфликт имён `add_slot` в schedule_service.py**
+──────────────────────────────────────────────────────────
+
+Переименовать синхронный метод `add_slot` в `add_slot_from_dto`, а асинхронный оставить как `add_slot`.
+
+================================================================================
+**ШАГ 4. ПРИВЕДЕНИЕ К ИДЕАЛЬНОМУ КОДУ (10/10)**
+================================================================================
+
+──────────────────────────────────────────────────────────
+**ПАТЧ IDEAL-01: Создать `src/config/texts.py` – единый источник всех текстов**
+──────────────────────────────────────────────────────────
+
+Создать новый файл `src/config/texts.py`:
+```python
+"""
+src/config/texts.py — Все видимые пользователю тексты и тексты кнопок.
+"""
+
+BTN_BOOK = "📅 Записаться"
+BTN_MY_APPOINTMENTS = "📋 Мои записи"
+BTN_ADMIN_PANEL = "⚙️ Админ-панель"
+BTN_MAIN_MENU = "🏠 Главное меню"
+BTN_SUBSCRIBE = "📢 Подписаться"
+BTN_CONFIRM_BOOKING = "✅ Подтвердить"
+BTN_CANCEL_BOOKING = "❌ Отмена"
+BTN_SKIP_COMMENT = "➡️ Пропустить"
+BTN_CANCEL_APPOINTMENT = "❌ Отменить запись"
+BTN_BACK = "⬅️ Назад"
+BTN_ALL_APPOINTMENTS = "📋 Все записи"
+BTN_SCHEDULE = "📅 Расписание"
+BTN_ADD_SLOT = "➕ Добавить слот"
+BTN_OPEN_DAY = "🗓 Открыть день"
+BTN_CLOSE_DAY = "🔒 Закрыть день"
+BTN_CANCEL_APPOINTMENT_ADMIN = "❌ Отменить запись"
+BTN_STATS = "📊 Статистика"
+BTN_CANCEL_ACTION = "❌ Отмена"
+
+BUSINESS_NAME = "маникюр"
+BUSINESS_EMOJI = "💅"
+MASTER_GREETING = "Добро пожаловать!"
+
+MSG_WELCOME_TEMPLATE = (
+    "👋 Привет, {name}!\n\n"
+    f"{BUSINESS_EMOJI} Я помогу вам записаться на {BUSINESS_NAME}.\n\n"
+    "Выберите действие в меню ниже:"
+)
+MSG_HELP = "ℹ️ <b>Справка</b>\n\n📌 <b>Мои записи</b> — посмотреть ваши активные записи\n📅 <b>Записаться</b> — забронировать новое время\n\nЕсли возникли вопросы — пишите администратору."
+MSG_REMINDER_TEMPLATE = (
+    f"⏰ <b>Напоминание о записи</b>\n\n"
+    "Завтра вы записаны на {service}:\n"
+    "📅 {date} в <b>{time}</b>\n\n"
+    f"Ждём вас! {BUSINESS_EMOJI}"
+)
+```
+
+Затем обновить все keyboard-файлы и хендлеры, заменив хардкодные строки на эти константы. Например, в `main_menu.py`:
+```python
+from src.config.texts import BTN_BOOK, BTN_MY_APPOINTMENTS, BTN_ADMIN_PANEL
+...
+builder.row(KeyboardButton(text=BTN_BOOK))
+```
+
+──────────────────────────────────────────────────────────
+**ПАТЧ IDEAL-02: Добавить обработку ошибок в ReminderService._send_reminder_job**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/application/services/reminder_service.py`**
+
+Оборачиваем вызов `send_reminder` в try/except с логированием.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ M-04: Добавить методы валидации в MessageFormatter**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/formatters/message_formatter.py`**
+
+Добавить:
+```python
+    @staticmethod
+    def invalid_name() -> str:
+        return "⚠️ Имя должно содержать от 2 до 100 символов. Попробуйте ещё раз:"
+
+    @staticmethod
+    def invalid_phone() -> str:
+        return "⚠️ Введите корректный номер телефона (минимум 7 цифр). Например: +7 999 123-45-67"
+
+    @staticmethod
+    def invalid_appointment_id() -> str:
+        return "⚠️ Введите числовой ID записи (например: 42)."
+```
+
+В хендлерах заменить соответствующие сообщения вызовами этих методов.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ L-02: Вынести дублирующиеся константы месяцев в общий модуль**
+──────────────────────────────────────────────────────────
+
+Создать файл `src/presentation/constants.py`:
+```python
+MONTHS_RU = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+MONTHS_RU_GEN = ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+CALENDAR_IGNORE_CB = "calendar_ignore"
+```
+
+В `calendar.py` и `message_formatter.py` импортировать эти константы вместо локальных определений.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ L-01: Удалить неиспользуемый метод `appointment_actions` из keyboards/admin.py**
+──────────────────────────────────────────────────────────
+
+Удалить, если он нигде не используется (проверить `grep`).
+
+──────────────────────────────────────────────────────────
+**ПАТЧ M-02: Добавить кнопку "Портфолио" в главное меню (или убрать portfolio_url из Settings)**
+──────────────────────────────────────────────────────────
+
+**Файл: `src/presentation/keyboards/main_menu.py`**
+
+Модифицировать метод `main`:
+```python
+    @staticmethod
+    def main(is_admin: bool = False, portfolio_url: Optional[str] = None) -> ReplyKeyboardMarkup:
+        builder = ReplyKeyboardBuilder()
+        builder.row(KeyboardButton(text=BTN_BOOK))
+        builder.row(KeyboardButton(text=BTN_MY_APPOINTMENTS))
+        if portfolio_url:
+            builder.row(KeyboardButton(text="💅 Портфолио", web_app=WebAppInfo(url=portfolio_url)))
+        if is_admin:
+            builder.row(KeyboardButton(text=BTN_ADMIN_PANEL))
+        return builder.as_markup(resize_keyboard=True)
+```
+
+В `common_handler.py` в `cmd_start` передавать `portfolio_url` из настроек.
+
+**Файл: `src/config/settings.py`** – изменить поле `portfolio_url` на `Optional[str]` с дефолтом `None`.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ L-04: Убрать устаревший ключ `version` из docker-compose.yml**
+──────────────────────────────────────────────────────────
+
+Удалить строку `version: "3.9"`.
+
+──────────────────────────────────────────────────────────
+**ПАТЧ L-06: Добавить pyproject.toml для оформления как пакета**
+──────────────────────────────────────────────────────────
+
+Создать `pyproject.toml` в корне:
+```toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "manicure-bot"
+version = "4.0.0"
+description = "Telegram-бот для онлайн-записи на маникюр"
+requires-python = ">=3.10"
+dependencies = [
+    "aiogram==3.13.1",
+    "pydantic==2.9.2",
+    "pydantic-settings==2.6.1",
+    "apscheduler==3.10.4",
+    "python-dotenv==1.0.1",
+]
+
+[project.optional-dependencies]
+redis = ["redis==5.2.0"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+```
+
+================================================================================
+**ШАГ 5. НАСТРОЙКА КОНФИГУРАЦИИ ДЛЯ ПЕРЕПРОДАЖИ (ОБЯЗАТЕЛЬНО)**
+================================================================================
+
+──────────────────────────────────────────────────────────
+**5.1. Обновить `src/config/settings.py` – все channel-параметры опциональны**
+──────────────────────────────────────────────────────────
+
+Привести к виду:
+```python
+    required_channel: Optional[str] = Field(default=None)
+    schedule_channel_id: Optional[int] = Field(default=None)
+    channel_id: Optional[str] = Field(default=None)
+    channel_link: Optional[str] = Field(default=None)
+    portfolio_url: Optional[str] = Field(default=None)
+```
+
+──────────────────────────────────────────────────────────
+**5.2. Создать `config.json` – файл визуальных настроек для мастера**
+──────────────────────────────────────────────────────────
+
+Создать в корне проекта `config.json`:
+```json
+{
+  "_comment": "Настройки внешнего вида бота. Измени под свой бизнес.",
+  "bot": {
+    "name": "Записаться на маникюр",
+    "service_name": "маникюр",
+    "master_name": "Мастер",
+    "welcome_emoji": "💅"
+  },
+  "messages": {
+    "welcome": "Привет, {name}!\n\n💅 Я помогу вам записаться на {service}.\n\nВыберите действие в меню ниже:",
+    "help": "ℹ️ Справка...",
+    "booking_success_note": "Ждём вас! За {hours} ч до визита придёт напоминание.",
+    "reminder_note": "Напоминаем, что вы записаны завтра в {time}.\nЖдём вас! 🌸",
+    "subscription_required": "Для использования бота необходимо подписаться на наш канал."
+  },
+  "buttons": {
+    "book": "📅 Записаться",
+    "my_appointments": "📋 Мои записи",
+    "portfolio": "💅 Портфолио",
+    "admin_panel": "⚙️ Админ-панель"
+  },
+  "schedule": {
+    "days_ahead": 30,
+    "default_time_slots": ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"]
+  }
+}
+```
+
+(Интеграцию `config.json` в код можно сделать позже, но файл должен присутствовать как образец.)
+
+──────────────────────────────────────────────────────────
+**5.3. Обновить `.gitignore`**
+──────────────────────────────────────────────────────────
+
+Добавить/проверить:
+```
+.env
+bot.log
+data/*.db
+data/*.sqlite
+*.log
+```
+
+================================================================================
+**ШАГ 6. ФИНАЛЬНАЯ ПРОВЕРКА**
+================================================================================
+
+6.1. Проверка синтаксиса:
+```bash
+python -m py_compile main.py
+find src/ -name "*.py" | xargs python -m py_compile
+```
+
+6.2. Проверка импортов:
+```bash
+python -c "from src.config.settings import Settings; s = Settings(); print('Settings OK')"
+```
+
+6.3. Тестовые сценарии (выполнить вручную через Telegram):
+   - Успешная запись клиента
+   - Лимит записей
+   - Отмена записи администратором
+   - Уведомления клиенту и администратору
+   - Напоминание (проверить планирование)
+
+6.4. Проверка отсутствия хардкода:
+```bash
+grep -rn "8701029014\|AAGyv6U5vGFmoXgLHdFsfoHzrRQ1tTUw9lA\|1656233031\|fwwewe" src/ .env.example
+# должно быть пусто
+```
+
+6.5. Проверка Docker-запуска:
+```bash
+cp .env.example .env
+# заполнить .env
+docker compose up --build
+```
+
+================================================================================
+**ШАГ 7. ИНСТРУКЦИЯ ДЛЯ МАСТЕРА-ПОКУПАТЕЛЯ (вложить в README.md)**
+================================================================================
+
+Мастеру нужно изменить только 2 файла:
+
+1. **`.env`** – настройки доступа:
+   - `BOT_TOKEN` – получить у @BotFather
+   - `ADMIN_IDS` – узнать через @userinfobot
+   - `PORTFOLIO_URL` – ссылка на Instagram/канал (опционально)
+   - `REQUIRED_CHANNEL` – @username канала для подписки (опционально)
+
+2. **`config.json`** – внешний вид бота:
+   - `bot.master_name` – имя мастера
+   - `bot.service_name` – название услуги
+   - `schedule.default_time_slots` – рабочие часы
+   - `messages.welcome` – приветственное сообщение
+
+Все остальные файлы трогать не нужно.
+
+================================================================================
+**ЧЕКЛИСТ КРИТЕРИЕВ УСПЕХА**
+================================================================================
+
+[ ] Бот запускается без ошибок (`python main.py`)
+[ ] `.env` и `.env.example` не содержат реального токена
+[ ] `bot.log` и `data/*.db` не попадают в git (игнорируются)
+[ ] Нет дублирующихся методов в `appointment_service.py`
+[ ] Кнопка "⚙️ Админ-панель" работает
+[ ] После записи администратор получает уведомление
+[ ] Фильтр "за неделю" использует один range-запрос (не 7)
+[ ] `calendar_ignore` callback обрабатывается корректно
+[ ] `config.json` и `.env.example` содержат все настраиваемые параметры
+[ ] Все `assert` заменены на `RuntimeError`
+[ ] `import re` вынесен на уровень модуля
+[ ] Docker-контейнер собирается и запускается
+
+================================================================================
+**ИНСТРУКЦИЯ ЗАВЕРШЕНА. ПРИСТУПИТЬ К ВЫПОЛНЕНИЮ.** 
+================================================================================
