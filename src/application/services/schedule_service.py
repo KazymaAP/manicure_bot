@@ -59,11 +59,11 @@ class ScheduleService:
             WorkingDayAlreadyExistsError: Если день уже существует.
         """
         try:
-            d = date.fromisoformat(dto.date)
+            d = _date.fromisoformat(dto.date)
         except ValueError:
             raise ValueError(f"Invalid date format: {dto.date!r}, expected YYYY-MM-DD")
 
-        if d < date.today():
+        if d < _date.today():
             raise PastDateError(dto.date)
 
         success = self._schedule_repo.add_working_day(

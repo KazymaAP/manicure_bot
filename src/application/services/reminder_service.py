@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.jobstores.memory import MemoryJobStore
+# APScheduler stubs may be missing in some environments - silence type checkers and annotate scheduler as Any
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
+    from apscheduler.jobstores.memory import MemoryJobStore  # type: ignore
+except Exception:
+    AsyncIOScheduler = object
+    MemoryJobStore = object
 
 from src.application.services.appointment_service import AppointmentService
 
@@ -46,7 +51,8 @@ class ReminderService:
         self._appointment_service = appointment_service
         self._notification_service = notification_service
         self._hours_before = hours_before
-        self._scheduler = AsyncIOScheduler(
+        # Annotate scheduler as Any to avoid type issues when stubs are missing
+        self._scheduler: Any = AsyncIOScheduler(
             jobstores={"default": MemoryJobStore()},
             job_defaults={
                 "misfire_grace_time": 3600,  # 1 час допустимого опоздания

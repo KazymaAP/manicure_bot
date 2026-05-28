@@ -9,7 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from src.config.settings import Settings, get_settings
+from src.config.settings import get_settings
 from src.config.logging_config import setup_logging
 from src.config.dependencies import Container
 

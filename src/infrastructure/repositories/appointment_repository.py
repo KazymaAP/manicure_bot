@@ -222,7 +222,7 @@ class AppointmentRepository(BaseRepository):
             ).fetchall()
         return [Appointment.from_row(dict(row)) for row in rows]
 
-    def get_statistics_raw(self) -> dict:
+    def get_statistics_raw(self) -> dict[str, int]:
         """Возвращает статистику через SQL COUNT — без загрузки всех записей.
 
         Returns:
