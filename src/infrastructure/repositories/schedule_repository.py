@@ -233,6 +233,30 @@ class ScheduleRepository(BaseRepository):
             ).fetchall()
         return [TimeSlot.from_row(dict(row)) for row in rows]
 
+    def get_available_dates_in_range(self, from_date: str, to_date: str) -> set[str]:
+        """Возвращает множество дат с хотя бы одним свободным слотом в диапазоне (оптимизация N+1).
+
+        Вместо отдельного SELECT для каждой даты, делает один запрос с JOIN.
+
+        Args:
+            from_date: Начало диапазона «YYYY-MM-DD».
+            to_date: Конец диапазона «YYYY-MM-DD».
+
+        Returns:
+            Множество дат «YYYY-MM-DD» с свободными слотами.
+        """
+        with self._db.read_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT ts.date
+                FROM time_slots ts
+                JOIN working_days wd ON wd.date = ts.date
+                WHERE ts.date BETWEEN ? AND ? AND ts.is_booked = 0 AND wd.is_closed = 0
+                """,
+                (from_date, to_date),
+            ).fetchall()
+        return {row[0] for row in rows}
+
     def book_slot(self, date: str, time: str) -> bool:
         """Бронирует слот атомарно (предотвращает двойное бронирование).
 

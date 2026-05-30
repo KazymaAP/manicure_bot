@@ -267,6 +267,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data.startswith("cancel_appt:"))
     async def cancel_appointment(callback: CallbackQuery) -> None:
         appt_id = int(callback.data.split(":")[1])
+        answered = False
         try:
             appt_service.cancel_appointment(appt_id, callback.from_user.id)
             # Уведомляем администратора об отмене
@@ -275,10 +276,50 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 MessageFormatter.appointment_cancel_success(),
                 reply_markup=None,
             )
+            await callback.answer()
+            answered = True
         except Exception as exc:
             logger.warning("Не удалось отменить запись %s: %s", appt_id, exc)
             await callback.answer(MessageFormatter.appointment_not_found(), show_alert=True)
+            answered = True
         finally:
-            await callback.answer()
+            if not answered:
+                await callback.answer()
+
+    # ── Возврат к выбору даты из выбора времени (H-09) ───────────────────
+    @router.callback_query(BookingFSM.choosing_time, F.data == "book_start")
+    async def back_to_booking(callback: CallbackQuery, state: FSMContext) -> None:
+        """Возвращает пользователя к выбору даты при нажатии 'Назад'."""
+        available_dates = await sched_service.get_available_dates_async()
+        if not available_dates:
+            await callback.answer(MessageFormatter.no_available_dates(), show_alert=True)
+            await state.clear()
+            return
+        today = _date.today()
+        cal = CalendarKeyboard.build(
+            year=today.year,
+            month=today.month,
+            available_dates=set(available_dates),
+        )
+        await state.set_state(BookingFSM.choosing_date)
+        await callback.message.edit_text(
+            MessageFormatter.choose_date(),
+            reply_markup=cal,
+        )
+        await callback.answer()
+
+    # ── Главное меню из списка записей (H-07) ────────────────────────────
+    @router.callback_query(F.data == "main_menu")
+    async def main_menu(callback: CallbackQuery, state: FSMContext) -> None:
+        """Возвращает пользователя в главное меню."""
+        await state.clear()
+        is_admin = callback.from_user.id in settings.admin_ids
+        portfolio = _get_portfolio(settings)
+        await callback.message.edit_text(
+            MessageFormatter.main_menu_title(),
+            reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
+            parse_mode="HTML",
+        )
+        await callback.answer()
 
     return router

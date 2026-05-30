@@ -36,15 +36,18 @@ class ScheduleService:
         self,
         schedule_repo: ScheduleRepository,
         days_ahead: int = 30,
+        default_time_slots: list[str] | None = None,
     ) -> None:
         """Инициализирует сервис.
 
         Args:
             schedule_repo: Репозиторий расписания.
             days_ahead: Горизонт расписания (дней вперёд). Берётся из settings.
+            default_time_slots: Временные слоты по умолчанию.
         """
         self._schedule_repo = schedule_repo
         self._days_ahead = days_ahead
+        self._default_time_slots = default_time_slots or []
 
     def add_working_day(self, dto: AddWorkingDayDTO) -> None:
         """Добавляет рабочий день.
@@ -74,7 +77,7 @@ class ScheduleService:
         logger.info("Working day added: %s", dto.date)
 
     def get_available_dates(self, from_date: _date, days_ahead: int) -> set[str]:
-        """Возвращает множество доступных дат для записи.
+        """Возвращает множество доступных дат для записи (оптимизировано N+1).
 
         Фильтрует дни с хотя бы одним свободным слотом.
 
@@ -86,15 +89,9 @@ class ScheduleService:
             Множество строк дат «YYYY-MM-DD».
         """
         to_date = from_date + timedelta(days=days_ahead)
-        open_days = self._schedule_repo.get_open_days_in_range(
+        return self._schedule_repo.get_available_dates_in_range(
             from_date.isoformat(), to_date.isoformat()
         )
-        result: set[str] = set()
-        for day in open_days:
-            free = self._schedule_repo.get_free_slots(day.date)
-            if free:
-                result.add(day.date)
-        return result
 
     def get_all_working_days(self, from_date: _date, days_ahead: int) -> list[WorkingDay]:
         """Возвращает все рабочие дни в диапазоне (включая закрытые).
@@ -159,6 +156,41 @@ class ScheduleService:
             raise WorkingDayNotFoundError(date_str)
         self._schedule_repo.set_day_status(date_str, is_closed)
         logger.info("Day %s status set to closed=%s", date_str, is_closed)
+
+    def open_day(self, date_str: str) -> None:
+        """Открывает рабочий день, создав его с дефолтными слотами если нужно.
+
+        Args:
+            date_str: Дата «YYYY-MM-DD».
+        """
+        day = self._schedule_repo.get_working_day(date_str)
+        if not day:
+            self._schedule_repo.add_working_day(date_str, self._default_time_slots)
+        self._schedule_repo.set_day_status(date_str, is_closed=False)
+        logger.info("Day %s opened", date_str)
+
+    def close_day(self, date_str: str) -> None:
+        """Закрывает рабочий день.
+
+        Args:
+            date_str: Дата «YYYY-MM-DD».
+        """
+        day = self._schedule_repo.get_working_day(date_str)
+        if not day:
+            self._schedule_repo.add_working_day(date_str, self._default_time_slots)
+        self._schedule_repo.set_day_status(date_str, is_closed=True)
+        logger.info("Day %s closed", date_str)
+
+    def ensure_working_day_exists(self, date_str: str) -> None:
+        """Гарантирует, что рабочий день существует (с дефолтными слотами если нужно).
+
+        Args:
+            date_str: Дата «YYYY-MM-DD».
+        """
+        day = self._schedule_repo.get_working_day(date_str)
+        if not day:
+            self._schedule_repo.add_working_day(date_str, self._default_time_slots)
+            logger.debug("Working day %s created with default slots", date_str)
 
     def add_slot_from_dto(self, dto: AddSlotDTO) -> bool:
         """Добавляет временной слот из DTO.

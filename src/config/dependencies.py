@@ -6,7 +6,10 @@ src/config/dependencies.py — DI-контейнер приложения.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -22,6 +25,27 @@ from src.infrastructure.repositories.appointment_repository import AppointmentRe
 from src.infrastructure.repositories.schedule_repository import ScheduleRepository
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _load_config_json() -> dict:
+    """Загружает и кэширует config.json (читается один раз при запуске).
+
+    Returns:
+        Словарь конфигурации из config.json.
+    """
+    config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            config = json.load(f)
+        logger.debug("Config loaded from %s", config_path)
+        return config
+    except FileNotFoundError:
+        logger.warning("config.json not found at %s, using defaults", config_path)
+        return {}
+    except json.JSONDecodeError as e:
+        logger.error("Invalid JSON in config.json: %s", e)
+        return {}
 
 
 class Container:
@@ -85,27 +109,21 @@ class Container:
             schedule_repo=self._schedule_repo,
             max_per_user=self._settings.max_appointments_per_user,
         )
-        # Загружаем service_name из config.json
-        import json
-        import os
-        _config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
-        try:
-            with open(_config_path, encoding="utf-8") as _f:
-                _cfg = json.load(_f)
-            _service_name = _cfg.get("bot", {}).get("service_name", "маникюр")
-        except Exception:
-            _service_name = "маникюр"
+        # Загружаем service_name из config.json (кэшированный)
+        config = _load_config_json()
+        service_name = config.get("bot", {}).get("service_name", "маникюр")
 
         self._schedule_service = ScheduleService(
             schedule_repo=self._schedule_repo,
             days_ahead=self._settings.schedule_days_ahead,
+            default_time_slots=self._settings.default_time_slots,
         )
         self._notification_service = NotificationService(
             bot=bot,
             admin_ids=self._settings.admin_ids,
             schedule_channel_id=self._settings.schedule_channel_id,
             appointment_repo=self._appointment_repo,
-            service_name=_service_name,
+            service_name=service_name,
         )
         self._reminder_service = ReminderService(
             appointment_service=self._appointment_service,

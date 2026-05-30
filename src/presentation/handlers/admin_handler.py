@@ -246,22 +246,11 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if data.get("is_opening") is not None:
             is_opening = bool(data.get("is_opening"))
             try:
-                # Попытаемся получить день
-                day = sched_service._schedule_repo.get_working_day(date_str)
                 if is_opening:
-                    if not day:
-                        # Создаём день с дефолтными слотами
-                        sched_service._schedule_repo.add_working_day(date_str, list(settings.default_time_slots))
-                        sched_service._schedule_repo.set_day_status(date_str, is_closed=False)
-                    else:
-                        # Если день есть, просто откроем его
-                        sched_service._schedule_repo.set_day_status(date_str, is_closed=False)
+                    sched_service.open_day(date_str)
                     await message.answer(MessageFormatter.admin_day_opened(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
                 else:
-                    if not day:
-                        # Создаём день и сразу закроем его (чтобы он появился в списке как закрытый)
-                        sched_service._schedule_repo.add_working_day(date_str, list(settings.default_time_slots))
-                    sched_service._schedule_repo.set_day_status(date_str, is_closed=True)
+                    sched_service.close_day(date_str)
                     await message.answer(MessageFormatter.admin_day_closed(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
             except Exception as exc:
                 logger.error("Ошибка при открытии/закрытии дня %s: %s", date_str, exc)
@@ -273,10 +262,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         # Иначе — стандартный поток добавления слота
         # Убедимся, что рабочий день существует — иначе добавленный слот не будет виден в списках
         try:
-            day = sched_service._schedule_repo.get_working_day(date_str)
-            if not day:
-                # Создаём пустой рабочий день (слоты добавим ниже), чтобы он появился в списке
-                sched_service._schedule_repo.add_working_day(date_str, [])
+            sched_service.ensure_working_day_exists(date_str)
         except Exception as exc:
             logger.warning("Не удалось проверить/создать рабочий день %s: %s", date_str, exc)
 

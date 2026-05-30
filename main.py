@@ -79,6 +79,13 @@ async def main() -> None:
             pass
         await container.shutdown()
         await bot.session.close()
+        # Закрываем FSM Storage gracefully если это не MemoryStorage
+        if not isinstance(storage, MemoryStorage):
+            try:
+                await storage.close()
+                logger.info("FSM Storage closed.")
+            except Exception as e:
+                logger.warning("Error closing FSM storage: %s", e)
         logger.info("Бот остановлен.")
 
 

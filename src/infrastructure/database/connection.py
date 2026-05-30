@@ -62,10 +62,26 @@ class DatabaseManager:
         cls._initialized = False
 
     def _ensure_directory(self) -> None:
-        """Создаёт директорию для файла БД, если она не существует."""
+        """Создаёт директорию для файла БД, если она не существует.
+
+        Raises:
+            RuntimeError: Если директория не существует или нет прав на запись.
+        """
         directory = os.path.dirname(self._db_path)
-        if directory:
+        if not directory:
+            return
+        try:
             os.makedirs(directory, exist_ok=True)
+            # Проверяем, что директория доступна для записи
+            test_file = os.path.join(directory, ".write_test")
+            with open(test_file, "w") as f:
+                f.write("")
+            os.remove(test_file)
+        except (OSError, IOError) as e:
+            raise RuntimeError(
+                f"Cannot create or write to database directory {directory!r}: {e}. "
+                f"Check directory permissions and volume mounts (Docker)."
+            ) from e
 
     def get_connection(self) -> sqlite3.Connection:
         """Создаёт соединение с per-connection настройками PRAGMA.
