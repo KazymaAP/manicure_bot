@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 # APScheduler stubs may be missing in some environments - silence type checkers and annotate scheduler as Any
 try:
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
     from apscheduler.jobstores.memory import MemoryJobStore  # type: ignore
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
 except Exception:
     AsyncIOScheduler = object
     MemoryJobStore = object
@@ -38,7 +38,7 @@ class ReminderService:
     def __init__(
         self,
         appointment_service: AppointmentService,
-        notification_service: "NotificationService",
+        notification_service: NotificationService,
         hours_before: int = 24,
     ) -> None:
         """Инициализирует сервис.

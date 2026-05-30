@@ -1,14 +1,11 @@
 # src/presentation/formatters/message_formatter.py
 """Форматирование сообщений для пользователей и администратора."""
 
-from datetime import datetime, date
-from typing import Optional
+from datetime import datetime
 
 from src.domain.models.appointment import Appointment
 from src.domain.models.time_slot import TimeSlot
-from src.domain.models.working_day import WorkingDay
-from src.domain.enums.appointment_status import AppointmentStatus
-from src.presentation.constants import MONTHS_RU, MONTHS_RU_GEN, WEEKDAYS_RU
+from src.presentation.constants import MONTHS_RU_GEN
 
 
 class MessageFormatter:
@@ -17,7 +14,7 @@ class MessageFormatter:
     # ── Общие ────────────────────────────────────────────────────────────
 
     @staticmethod
-    def welcome(username: Optional[str]) -> str:
+    def welcome(username: str | None) -> str:
         name = f"@{username}" if username else "дорогой гость"
         return (
             f"👋 Привет, {name}!\n\n"
@@ -92,7 +89,7 @@ class MessageFormatter:
         time_str: str,
         client_name: str,
         phone: str,
-        comment: Optional[str],
+        comment: str | None,
     ) -> str:
         d = datetime.strptime(date_str, "%Y-%m-%d")
         formatted_date = f"{d.day} {MONTHS_RU_GEN[d.month]} {d.year}"

@@ -4,7 +4,6 @@ src/domain/models/working_day.py — Доменная модель «Рабоч�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from src.domain.enums import DayStatus
 
@@ -20,7 +19,7 @@ class WorkingDay:
     """
 
     date: str
-    id: Optional[int] = field(default=None)
+    id: int | None = field(default=None)
     status: DayStatus = field(default=DayStatus.OPEN)
 
     @property
@@ -42,7 +41,7 @@ class WorkingDay:
         self.status = DayStatus.OPEN
 
     @classmethod
-    def from_row(cls, row: dict) -> "WorkingDay":
+    def from_row(cls, row: dict) -> WorkingDay:
         """Создаёт экземпляр из строки БД.
 
         Args:

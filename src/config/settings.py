@@ -9,9 +9,8 @@ src/config/settings.py — Централизованная конфигурац
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Optional
 
-from pydantic import Field, field_validator, ConfigDict
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -31,7 +30,7 @@ class Settings(BaseSettings):
     )
 
     # ─── Каналы ──────────────────────────────────────────────
-    required_channel: Optional[str] = Field(
+    required_channel: str | None = Field(
         default=None,
         description="Канал для обязательной подписки (@channel_name)",
     )
@@ -77,20 +76,20 @@ class Settings(BaseSettings):
     )
 
     # ─── Портфолио ───────────────────────────────────────────
-    portfolio_url: Optional[str] = Field(
+    portfolio_url: str | None = Field(
         default=None,
         description="URL портфолио мастера (Instagram, канал, сайт). Если не задан — кнопка скрыта.",
     )
 
     # ─── Redis (опционально для FSM и кэша) ──────────────────
-    redis_url: Optional[str] = Field(
+    redis_url: str | None = Field(
         default=None,
         description="URL Redis (redis://host:port/db), если не задан — MemoryStorage",
     )
 
     # ─── Логирование ─────────────────────────────────────────
     log_level: str = Field(default="INFO", description="Уровень логирования")
-    log_file: Optional[str] = Field(
+    log_file: str | None = Field(
         default="bot.log",
         description="Файл логов (None = только stdout)",
     )

@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Optional
 
-from src.domain.models.working_day import WorkingDay
 from src.domain.models.time_slot import TimeSlot
-from src.infrastructure.repositories.base import BaseRepository
+from src.domain.models.working_day import WorkingDay
 from src.infrastructure.database.connection import DatabaseManager
+from src.infrastructure.repositories.base import BaseRepository
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +56,7 @@ class ScheduleRepository(BaseRepository):
             logger.error("Unexpected error adding working day %s: %s", date, exc)
             raise
 
-    def get_working_day(self, date: str) -> Optional[WorkingDay]:
+    def get_working_day(self, date: str) -> WorkingDay | None:
         """Находит рабочий день по дате.
 
         Args:

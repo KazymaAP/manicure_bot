@@ -8,18 +8,17 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date as _date, timedelta
-from typing import Optional
+from datetime import date as _date
+from datetime import timedelta
 
-from src.domain.models.working_day import WorkingDay
-from src.domain.models.time_slot import TimeSlot
+from src.application.dto.booking_dto import AddSlotDTO, AddWorkingDayDTO
 from src.domain.exceptions import (
+    PastDateError,
     WorkingDayAlreadyExistsError,
     WorkingDayNotFoundError,
-    PastDateError,
-    SlotNotFoundError,
 )
-from src.application.dto.booking_dto import AddWorkingDayDTO, AddSlotDTO
+from src.domain.models.time_slot import TimeSlot
+from src.domain.models.working_day import WorkingDay
 from src.infrastructure.repositories.schedule_repository import ScheduleRepository
 
 logger = logging.getLogger(__name__)

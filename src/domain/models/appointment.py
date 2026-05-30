@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 from src.domain.enums import AppointmentStatus
 
@@ -35,12 +34,12 @@ class Appointment:
     phone: str
     date: str
     time: str
-    id: Optional[int] = field(default=None)
-    username: Optional[str] = field(default=None)
-    created_at: Optional[datetime] = field(default=None)
+    id: int | None = field(default=None)
+    username: str | None = field(default=None)
+    created_at: datetime | None = field(default=None)
     reminder_sent: bool = field(default=False)
     status: AppointmentStatus = field(default=AppointmentStatus.ACTIVE)
-    comment: Optional[str] = field(default=None)
+    comment: str | None = field(default=None)
 
     def __post_init__(self) -> None:
         if self.created_at is None:
@@ -70,7 +69,7 @@ class Appointment:
         self.reminder_sent = True
 
     @classmethod
-    def from_row(cls, row: dict) -> "Appointment":
+    def from_row(cls, row: dict) -> Appointment:
         """Создаёт экземпляр из строки БД.
 
         Args:
@@ -79,7 +78,7 @@ class Appointment:
         Returns:
             Экземпляр Appointment.
         """
-        created_at: Optional[datetime] = None
+        created_at: datetime | None = None
         if row.get("created_at"):
             try:
                 created_at = datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S")

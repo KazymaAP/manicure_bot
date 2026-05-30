@@ -10,16 +10,16 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from aiogram import Bot, Dispatcher
+    from aiogram import Bot
 
+from src.application.services.appointment_service import AppointmentService
+from src.application.services.notification_service import NotificationService
+from src.application.services.reminder_service import ReminderService
+from src.application.services.schedule_service import ScheduleService
 from src.config.settings import Settings
 from src.infrastructure.database.connection import DatabaseManager
 from src.infrastructure.repositories.appointment_repository import AppointmentRepository
 from src.infrastructure.repositories.schedule_repository import ScheduleRepository
-from src.application.services.appointment_service import AppointmentService
-from src.application.services.schedule_service import ScheduleService
-from src.application.services.notification_service import NotificationService
-from src.application.services.reminder_service import ReminderService
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class Container:
             raise RuntimeError("Database not initialized. Call initialize() first.")
         return self._db
 
-    def build_services(self, bot: "Bot") -> None:
+    def build_services(self, bot: Bot) -> None:
         """Создаёт все сервисы приложения.
 
         Должен вызываться ПОСЛЕ initialize_db().

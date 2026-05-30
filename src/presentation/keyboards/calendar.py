@@ -9,10 +9,10 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from src.presentation.constants import MONTHS_RU, WEEKDAYS_RU, CALENDAR_IGNORE_CB
+from src.presentation.constants import CALENDAR_IGNORE_CB, MONTHS_RU, WEEKDAYS_RU
 
 IGNORE_CB = CALENDAR_IGNORE_CB
 

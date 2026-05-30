@@ -2,18 +2,18 @@
 tests/unit/test_services/test_appointment_service.py
 Unit-тесты для AppointmentService.
 """
-import pytest
-from unittest.mock import MagicMock, patch
-from datetime import date
+from unittest.mock import MagicMock
 
+import pytest
+
+from src.application.dto.booking_dto import CreateBookingDTO
 from src.application.services.appointment_service import AppointmentService
-from src.domain.models.appointment import Appointment
 from src.domain.enums.appointment_status import AppointmentStatus
 from src.domain.exceptions.appointment import (
     AppointmentAlreadyExistsError,
     SlotAlreadyBookedError,
 )
-from src.application.dto.booking_dto import CreateBookingDTO
+from src.domain.models.appointment import Appointment
 
 
 @pytest.fixture

@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +23,9 @@ class DatabaseManager:
     Поддерживает WAL-режим и foreign keys для надёжности.
     """
 
-    _instance: "DatabaseManager | None" = None
+    _instance: DatabaseManager | None = None
 
-    def __new__(cls, db_path: str) -> "DatabaseManager":
+    def __new__(cls, db_path: str) -> DatabaseManager:
         """Возвращает единственный экземпляр (Singleton)."""
         if cls._instance is None:
             instance = super().__new__(cls)

@@ -7,7 +7,6 @@ src/application/dto/booking_dto.py — Data Transfer Objects.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,8 +17,8 @@ class CreateBookingDTO:
     phone: str
     date: str
     time: str
-    username: Optional[str] = None
-    comment: Optional[str] = None
+    username: str | None = None
+    comment: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +34,7 @@ class BookingResultDTO:
 class AddWorkingDayDTO:
     """DTO для добавления рабочего дня."""
     date: str
-    default_slots: Tuple[str, ...] = ()
+    default_slots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

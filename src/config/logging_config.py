@@ -5,10 +5,9 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Optional
 
 
-def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> None:
+def setup_logging(log_level: str = "INFO", log_file: str | None = None) -> None:
     """Настраивает логирование приложения.
 
     Args:

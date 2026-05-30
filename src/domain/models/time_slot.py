@@ -4,7 +4,6 @@ src/domain/models/time_slot.py — Доменная модель «Времен�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass(slots=True)
@@ -20,7 +19,7 @@ class TimeSlot:
 
     date: str
     time: str
-    id: Optional[int] = field(default=None)
+    id: int | None = field(default=None)
     is_booked: bool = field(default=False)
 
     @property
@@ -37,7 +36,7 @@ class TimeSlot:
         self.is_booked = False
 
     @classmethod
-    def from_row(cls, row: dict) -> "TimeSlot":
+    def from_row(cls, row: dict) -> TimeSlot:
         """Создаёт экземпляр из строки БД.
 
         Args:

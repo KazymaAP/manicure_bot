@@ -5,8 +5,7 @@ src/presentation/keyboards/main_menu.py — Клавиатуры главног�
 """
 from __future__ import annotations
 
-from typing import Optional
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 
@@ -14,9 +13,9 @@ class MainMenuKeyboard:
     """Клавиатуры главного меню пользователя."""
 
     @staticmethod
-    def main(is_admin: bool = False, portfolio_url: Optional[str] = None) -> ReplyKeyboardMarkup:
+    def main(is_admin: bool = False, portfolio_url: str | None = None) -> ReplyKeyboardMarkup:
         """Главное меню пользователя.
-        
+
         Args:
             is_admin: Если True, добавляет админ кнопку.
             portfolio_url: Ссылка на портфолио (если задана — добавляет кнопку).

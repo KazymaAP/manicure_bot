@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 from src.domain.models.appointment import Appointment
-from src.infrastructure.repositories.base import BaseRepository
 from src.infrastructure.database.connection import DatabaseManager
+from src.infrastructure.repositories.base import BaseRepository
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class AppointmentRepository(BaseRepository):
             )
             return cur.lastrowid
 
-    def get_by_id(self, appointment_id: int) -> Optional[Appointment]:
+    def get_by_id(self, appointment_id: int) -> Appointment | None:
         """Находит запись по ID.
 
         Args:
@@ -76,7 +75,7 @@ class AppointmentRepository(BaseRepository):
             ).fetchone()
         return Appointment.from_row(dict(row)) if row else None
 
-    def get_active_by_user_id(self, user_id: int) -> Optional[Appointment]:
+    def get_active_by_user_id(self, user_id: int) -> Appointment | None:
         """Находит первую активную запись пользователя.
 
         Args:
@@ -228,7 +227,8 @@ class AppointmentRepository(BaseRepository):
         Returns:
             Словарь: total, confirmed, cancelled, today, week.
         """
-        from datetime import date as _date, timedelta
+        from datetime import date as _date
+        from datetime import timedelta
         today_str = _date.today().isoformat()
         week_end = (_date.today() + timedelta(days=7)).isoformat()
 

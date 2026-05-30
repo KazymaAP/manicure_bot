@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from typing import Optional
 
-from src.domain.models.appointment import Appointment
+from src.application.dto.booking_dto import BookingResultDTO, CreateBookingDTO
 from src.domain.exceptions import (
-    AppointmentNotFoundError,
     AppointmentAlreadyExistsError,
+    AppointmentNotFoundError,
     SlotAlreadyBookedError,
 )
-from src.application.dto.booking_dto import CreateBookingDTO, BookingResultDTO
+from src.domain.models.appointment import Appointment
 from src.infrastructure.repositories.appointment_repository import AppointmentRepository
 from src.infrastructure.repositories.schedule_repository import ScheduleRepository
 
@@ -102,8 +101,8 @@ class AppointmentService:
         time_str: str,
         client_name: str,
         phone: str,
-        comment: Optional[str] = None,
-        username: Optional[str] = None,
+        comment: str | None = None,
+        username: str | None = None,
     ) -> int:
         """Создаёт запись (удобная обёртка над create_booking).
 
@@ -137,7 +136,7 @@ class AppointmentService:
 
     # ─── Отмена записи ────────────────────────────────────────────────────
 
-    def cancel_by_user(self, user_id: int) -> Optional[Appointment]:
+    def cancel_by_user(self, user_id: int) -> Appointment | None:
         """Отменяет активную запись пользователя.
 
         Args:
@@ -151,7 +150,7 @@ class AppointmentService:
             return None
         return self._do_cancel(appointment)
 
-    def cancel_by_id(self, appointment_id: int) -> Optional[Appointment]:
+    def cancel_by_id(self, appointment_id: int) -> Appointment | None:
         """Отменяет запись по ID.
 
         Args:
@@ -170,7 +169,7 @@ class AppointmentService:
             return None
         return self._do_cancel(appointment)
 
-    def cancel_appointment(self, appointment_id: int, user_id: int) -> Optional[Appointment]:
+    def cancel_appointment(self, appointment_id: int, user_id: int) -> Appointment | None:
         """Отменяет запись клиентом (с проверкой владельца).
 
         Args:
@@ -190,7 +189,7 @@ class AppointmentService:
             raise AppointmentNotFoundError(appointment_id)
         return self._do_cancel(appointment)
 
-    def admin_cancel_appointment(self, appointment_id: int) -> Optional[Appointment]:
+    def admin_cancel_appointment(self, appointment_id: int) -> Appointment | None:
         """Отменяет запись администратором (без проверки владельца).
 
         Args:
@@ -230,7 +229,7 @@ class AppointmentService:
 
     # ─── Чтение записей ───────────────────────────────────────────────────
 
-    def get_appointment_by_id(self, appointment_id: int) -> Optional[Appointment]:
+    def get_appointment_by_id(self, appointment_id: int) -> Appointment | None:
         """Возвращает запись по ID.
 
         Args:
@@ -241,7 +240,7 @@ class AppointmentService:
         """
         return self._appointment_repo.get_by_id(appointment_id)
 
-    def get_active_appointment(self, user_id: int) -> Optional[Appointment]:
+    def get_active_appointment(self, user_id: int) -> Appointment | None:
         """Возвращает активную запись пользователя."""
         return self._appointment_repo.get_active_by_user_id(user_id)
 

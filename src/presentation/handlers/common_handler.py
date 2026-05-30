@@ -2,13 +2,14 @@
 """Общие обработчики: /start, /help, проверка подписки."""
 
 import logging
-from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery
+
+from aiogram import F, Router
+from aiogram.filters import Command, CommandStart
+from aiogram.types import Message
 
 from src.config.dependencies import Container
-from src.presentation.keyboards.main_menu import MainMenuKeyboard
 from src.presentation.formatters.message_formatter import MessageFormatter
+from src.presentation.keyboards.main_menu import MainMenuKeyboard
 
 logger = logging.getLogger(__name__)
 
@@ -72,15 +73,16 @@ def setup_common_router(container: Container) -> Router:
                 logger.debug("Не удалось получить chat info: %s", chat_exc)
 
             try:
-                from aiogram.exceptions import TelegramBadRequest
+                import aiogram.exceptions as _aiogram_exceptions
+                telegram_bad_request = getattr(_aiogram_exceptions, "TelegramBadRequest", None)
             except Exception:
-                TelegramBadRequest = None
+                telegram_bad_request = None
 
             msg = str(exc).lower()
             # Полный трейс ошибки — полезно для дебага
             logger.exception("Ошибка при вызове get_chat_member: %s", msg)
 
-            if TelegramBadRequest is not None and isinstance(exc, TelegramBadRequest):
+            if telegram_bad_request is not None and isinstance(exc, telegram_bad_request):
                 logger.info(
                     "TelegramBadRequest при проверке подписки для пользователя %s: %s",
                     user_id, msg

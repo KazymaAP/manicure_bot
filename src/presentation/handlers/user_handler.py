@@ -1,25 +1,24 @@
 # src/presentation/handlers/user_handler.py
 """FSM-обработчики для записи клиента на маникюр."""
 
-import calendar as _cal
 import logging
 from datetime import date as _date
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import BookingFSM
 from src.domain.exceptions.appointment import (
-    SlotAlreadyBookedError,
     MaxAppointmentsReachedError,
+    SlotAlreadyBookedError,
 )
-from src.presentation.keyboards.calendar import CalendarKeyboard
-from src.presentation.keyboards.booking import BookingKeyboard
-from src.presentation.keyboards.main_menu import MainMenuKeyboard
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.handlers.common_handler import _get_portfolio
+from src.presentation.keyboards.booking import BookingKeyboard
+from src.presentation.keyboards.calendar import CalendarKeyboard
+from src.presentation.keyboards.main_menu import MainMenuKeyboard
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +120,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(BookingFSM.choosing_time, F.data.startswith("slot:"))
     async def choose_time(callback: CallbackQuery, state: FSMContext) -> None:
         parts = callback.data.split(":", 2)
-        date_str = parts[1]
         time_str = parts[2].replace("-", ":")
         await state.update_data(chosen_time=time_str)
         await state.set_state(BookingFSM.entering_name)

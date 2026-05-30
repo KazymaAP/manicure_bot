@@ -26,7 +26,7 @@ class NotificationService:
 
     def __init__(
         self,
-        bot: "Bot",
+        bot: Bot,
         admin_ids: list[int],
         schedule_channel_id: int,
         appointment_repo: AppointmentRepository,

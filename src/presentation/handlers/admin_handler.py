@@ -3,16 +3,16 @@
 
 import logging
 import re
-from aiogram import Router, F
+
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import AdminFSM
-from src.presentation.keyboards.admin import AdminKeyboard
-from src.presentation.keyboards.main_menu import MainMenuKeyboard
 from src.presentation.formatters.message_formatter import MessageFormatter
+from src.presentation.keyboards.admin import AdminKeyboard
 
 logger = logging.getLogger(__name__)
 
