@@ -148,7 +148,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                         appt.user_id, appt.date, appt.time
                     )
                     if appt.id is not None:
-                        await reminder_service.cancel_reminder(appt.id)
+                        reminder_service.cancel_reminder(appt.id)
                 except Exception as notify_exc:
                     logger.warning(
                         "Не удалось уведомить клиента user_id=%s об отмене: %s",

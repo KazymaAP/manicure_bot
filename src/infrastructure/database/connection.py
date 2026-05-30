@@ -24,6 +24,7 @@ class DatabaseManager:
     """
 
     _instance: DatabaseManager | None = None
+    _initialized: bool = False
 
     def __new__(cls, db_path: str) -> DatabaseManager:
         """Возвращает единственный экземпляр (Singleton)."""
@@ -53,6 +54,12 @@ class DatabaseManager:
         self._initialized = True
         self._ensure_directory()
         logger.debug("DatabaseManager initialized with path: %s", db_path)
+
+    @classmethod
+    def reset(cls) -> None:
+        """Сбрасывает Singleton для тестов."""
+        cls._instance = None
+        cls._initialized = False
 
     def _ensure_directory(self) -> None:
         """Создаёт директорию для файла БД, если она не существует."""

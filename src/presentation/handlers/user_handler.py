@@ -268,7 +268,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     async def cancel_appointment(callback: CallbackQuery) -> None:
         appt_id = int(callback.data.split(":")[1])
         try:
-            await appt_service.cancel_appointment(appt_id, callback.from_user.id)
+            appt_service.cancel_appointment(appt_id, callback.from_user.id)
             # Уведомляем администратора об отмене
             await notif_service.notify_admin_cancellation(appt_id)
             await callback.message.edit_text(

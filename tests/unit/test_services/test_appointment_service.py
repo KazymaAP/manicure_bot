@@ -11,6 +11,7 @@ from src.application.services.appointment_service import AppointmentService
 from src.domain.enums.appointment_status import AppointmentStatus
 from src.domain.exceptions.appointment import (
     AppointmentAlreadyExistsError,
+    MaxAppointmentsReachedError,
     SlotAlreadyBookedError,
 )
 from src.domain.models.appointment import Appointment
@@ -69,9 +70,9 @@ class TestCreateBooking:
             service.create_booking(make_dto())
 
     def test_create_booking_max_appointments_reached(self, service, mock_appointment_repo):
-        """Превышен лимит записей — выбрасывает AppointmentAlreadyExistsError."""
+        """Превышен лимит записей — выбрасывает MaxAppointmentsReachedError."""
         mock_appointment_repo.count_active_by_user_id.return_value = 1
-        with pytest.raises(AppointmentAlreadyExistsError):
+        with pytest.raises(MaxAppointmentsReachedError):
             service.create_booking(make_dto())
 
 
@@ -115,3 +116,4 @@ class TestGetStatistics:
         assert stats["total"] == 0
         assert stats["confirmed"] == 0
         assert stats["cancelled"] == 0
+        mock_appointment_repo.get_statistics_raw.assert_called_once()

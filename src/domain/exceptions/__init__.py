@@ -4,6 +4,7 @@ src/domain/exceptions/__init__.py
 from src.domain.exceptions.appointment import (
     AppointmentAlreadyExistsError,
     AppointmentNotFoundError,
+    MaxAppointmentsReachedError,
     SlotAlreadyBookedError,
 )
 from src.domain.exceptions.base import DomainError, ValidationError
@@ -19,6 +20,7 @@ __all__ = [
     "ValidationError",
     "AppointmentNotFoundError",
     "AppointmentAlreadyExistsError",
+    "MaxAppointmentsReachedError",
     "SlotAlreadyBookedError",
     "WorkingDayAlreadyExistsError",
     "WorkingDayNotFoundError",
