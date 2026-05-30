@@ -1,0 +1,60 @@
+# Virtual Environment
+.venv
+venv
+ENV
+env
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing
+tests/
+pytest_cache/
+.pytest_cache
+.coverage
+htmlcov/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Project files
+.env
+.env.local
+config.json
+*.log
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CI/CD
+.github
+.gitlab-ci.yml
+Jenkinsfile
+
+# Documentation
+docs/
+README.md
+CHANGELOG.md
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

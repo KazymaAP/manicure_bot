@@ -4,12 +4,14 @@ src/infrastructure/database/connection.py — Управление соедин�
 ✅ Из v2_tar: DatabaseManager, transaction context manager, WAL mode, foreign_keys
 ✅ Улучшения v4: connection pool (check_same_thread=False), PRAGMA synchronous,
    лучшая обработка ошибок, метод execute_script
+✅ Улучшения v5: per-thread connection reuse, thread-local storage
 """
 from __future__ import annotations
 
 import logging
 import os
 import sqlite3
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -21,10 +23,12 @@ class DatabaseManager:
 
     Реализует паттерн Singleton для единственного экземпляра.
     Поддерживает WAL-режим и foreign keys для надёжности.
+    Использует thread-local storage для переиспользования соединений per-thread.
     """
 
     _instance: DatabaseManager | None = None
     _initialized: bool = False
+    _thread_local = threading.local()
 
     def __new__(cls, db_path: str) -> DatabaseManager:
         """Возвращает единственный экземпляр (Singleton)."""
@@ -60,6 +64,13 @@ class DatabaseManager:
         """Сбрасывает Singleton для тестов."""
         cls._instance = None
         cls._initialized = False
+        # Закрываем все thread-local соединения
+        if hasattr(cls._thread_local, 'conn') and cls._thread_local.conn:
+            try:
+                cls._thread_local.conn.close()
+            except Exception:
+                pass
+            cls._thread_local.conn = None
 
     def _ensure_directory(self) -> None:
         """Создаёт директорию для файла БД, если она не существует.
@@ -84,17 +95,22 @@ class DatabaseManager:
             ) from e
 
     def get_connection(self) -> sqlite3.Connection:
-        """Создаёт соединение с per-connection настройками PRAGMA.
+        """Создаёт или переиспользует соединение для текущего потока (per-thread reuse).
 
         WAL-режим устанавливается один раз в initialize_schema().
+        Это оптимизирует производительность при параллельных запросах,
+        избегая overhead на connect/close для каждого запроса.
         """
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA cache_size=-8000")
-        conn.execute("PRAGMA temp_store=MEMORY")
-        return conn
+        # Переиспользуем соединение для текущего потока
+        if not hasattr(self._thread_local, 'conn') or self._thread_local.conn is None:
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-8000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            self._thread_local.conn = conn
+        return self._thread_local.conn
 
     @contextmanager
     def transaction(self) -> Generator[sqlite3.Connection, None, None]:
@@ -175,6 +191,8 @@ class DatabaseManager:
                 ON appointments(date);
             CREATE INDEX IF NOT EXISTS idx_appointments_active
                 ON appointments(user_id, is_cancelled);
+            CREATE INDEX IF NOT EXISTS idx_appointments_date_active
+                ON appointments(date, is_cancelled);
             CREATE INDEX IF NOT EXISTS idx_time_slots_date
                 ON time_slots(date);
             CREATE INDEX IF NOT EXISTS idx_time_slots_free
