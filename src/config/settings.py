@@ -140,6 +140,15 @@ class Settings(BaseSettings):
         description="Временная зона для напоминаний (например 'Europe/Moscow'). По умолчанию UTC.",
     )
 
+    # ─── Health-check сервер ────────────────────────────────────────────
+    # FIXED H-04: вынесено из os.getenv() в Pydantic Settings для корректной валидации
+    health_port: int = Field(
+        default=8080,
+        ge=1,
+        le=65535,
+        description="Порт HTTP health-check сервера",
+    )
+
     # ─── Приветственное фото ─────────────────────────────────
     welcome_photo_url: str | None = Field(
         default=None,

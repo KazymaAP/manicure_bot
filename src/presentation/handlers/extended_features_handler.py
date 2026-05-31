@@ -98,7 +98,9 @@ def setup_extended_features_router(container: Container) -> Router:
         )
         await callback.answer()
 
-    @router.callback_query(BookingFSM.transferring_choosing_date, F.data.startswith("transfer_cal_date:"))
+    # FIXED C-03: CalendarKeyboard с prefix="transfer_cal" генерирует "transfer_cal_day:DATE"
+    # Старый код слушал "transfer_cal_date:" — несоответствие приводило к нерабочему переносу
+    @router.callback_query(BookingFSM.transferring_choosing_date, F.data.startswith("transfer_cal_day:"))
     async def transfer_choose_new_date(callback: CallbackQuery, state: FSMContext) -> None:
         """Выбор новой даты при переносе."""
         import asyncio
@@ -142,10 +144,14 @@ def setup_extended_features_router(container: Container) -> Router:
             await state.clear()
             return
 
-        # Пытаемся забронировать новый слот и отменить старый
-        # FIXED: создаём новую ПЕРЕД отменой старой (оптимистичный перенос)
+        # FIXED H-07: при переносе сначала отменяем старую запись, потом создаём новую.
+        # Прежний подход (создать новую → отменить старую) приводил к ошибке MaxAppointmentsReachedError
+        # при max_per_user=1, т.к. старая запись ещё активна в момент создания новой.
         try:
-            # Создаём новую запись с теми же данными
+            # Шаг 1: отменяем старую запись ДО создания новой
+            await asyncio.to_thread(appt_service.cancel_by_id, old_appt_id)
+
+            # Шаг 2: создаём новую запись с теми же данными
             from src.application.dto.booking_dto import CreateBookingDTO
 
             dto = CreateBookingDTO(
@@ -160,9 +166,6 @@ def setup_extended_features_router(container: Container) -> Router:
             )
 
             result = await asyncio.to_thread(appt_service.create_booking, dto)
-            
-            # Только ПОСЛЕ успешного создания отменяем старую запись
-            await asyncio.to_thread(appt_service.cancel_by_id, old_appt_id)
 
             await callback.message.answer(
                 f"✅ <b>Запись перенесена успешно!</b>\n\n"

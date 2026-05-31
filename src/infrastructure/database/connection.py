@@ -162,7 +162,12 @@ class DatabaseManager:
             raise
 
     def initialize_schema(self) -> None:
-        """Создаёт таблицы и индексы схемы БД, если они не существуют."""
+        """Создаёт таблицы и индексы схемы БД, если они не существуют.
+
+        FIXED H-06: executescript() всегда вызывает неявный COMMIT перед первым SQL-запросом.
+        Поэтому вызов executescript() внутри transaction() нарушает управление транзакцией.
+        Решение: вызываем executescript() НАПРЯМУЮ на соединении, без BEGIN/COMMIT обёртки.
+        """
         # FIXED: WAL-режим устанавливается ВНЕ транзакции — нельзя менять journal_mode внутри BEGIN
         conn = self.get_connection()
         conn.execute("PRAGMA journal_mode=WAL")
@@ -252,16 +257,20 @@ class DatabaseManager:
                 last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         """
-        with self.transaction() as conn:
-            conn.executescript(schema)
-            # FIXED: обратная совместимость — добавляем колонку service если её нет в существующей БД
-            try:
-                cols = [r[1] for r in conn.execute("PRAGMA table_info('appointments')").fetchall()]
+        # FIXED H-06: executescript() вызывается НАПРЯМУЮ (не внутри transaction()),
+        # т.к. executescript() сам делает неявный COMMIT перед выполнением DDL-команд.
+        # Вызов внутри BEGIN IMMEDIATE нарушил бы управление транзакцией.
+        conn.executescript(schema)
+        # FIXED: обратная совместимость — добавляем колонку service если её нет в существующей БД
+        # Используем отдельную транзакцию для ALTER TABLE (не executescript)
+        try:
+            with self.transaction() as conn2:
+                cols = [r[1] for r in conn2.execute("PRAGMA table_info('appointments')").fetchall()]
                 if 'service' not in cols:
-                    conn.execute("ALTER TABLE appointments ADD COLUMN service TEXT DEFAULT NULL")
+                    conn2.execute("ALTER TABLE appointments ADD COLUMN service TEXT DEFAULT NULL")
                     logger.info("Added missing column 'service' to appointments table for backward compatibility.")
-            except Exception:
-                logger.exception("Failed to ensure 'service' column exists; continuing.")
+        except Exception:
+            logger.exception("Failed to ensure 'service' column exists; continuing.")
         logger.info("Database schema initialized successfully.")
 
     async def close(self) -> None:

@@ -74,20 +74,21 @@ CREATE INDEX IF NOT EXISTS idx_waitlist_user_id ON waitlist(user_id);
 
 -- ── Шаблоны расписания ────────────────────────────────────────────────────
 -- FIXED: добавлена таблица для шаблонов рабочих дней
+-- FIXED архитектурное замечание: добавлено UNIQUE на name для соответствия connection.py
 CREATE TABLE IF NOT EXISTS workday_templates (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
+    name       TEXT    NOT NULL UNIQUE,  -- FIXED: добавлен UNIQUE как в connection.py
     slots      TEXT    NOT NULL,         -- JSON список временных слотов
     created_at TEXT    NOT NULL          -- YYYY-MM-DD HH:MM:SS
 );
 
 -- ── Бэкапы ────────────────────────────────────────────────────────────────
--- FIXED: добавлена таблица для отслеживания бэкапов (опционально)
+-- FIXED M-08: приведено к единому виду с connection.py (колонка path, не backup_path)
+-- Это предотвращает расхождение схемы при деплое через миграцию и через initialize_schema()
 CREATE TABLE IF NOT EXISTS backups (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    backup_path TEXT    NOT NULL,
-    created_at TEXT    NOT NULL,         -- YYYY-MM-DD HH:MM:SS
-    size_bytes INTEGER                   -- Размер бэкапа в байтах
+    path       TEXT    NOT NULL,         -- FIXED: было backup_path — теперь соответствует connection.py
+    created_at TEXT    NOT NULL          -- YYYY-MM-DD HH:MM:SS
 );
 
 -- ── Пользователи ────────────────────────────────────────────────────────────

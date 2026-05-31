@@ -157,9 +157,11 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         appt_id = int(callback.data.split(":")[1])
         import asyncio
+        from src.domain.exceptions.appointment import AppointmentNotFoundError as _ApptNotFoundError
         appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
         try:
-            # FIXED: выполняем синхронную отмену в фоне
+            # FIXED H-03: race condition — между get и cancel клиент мог уже отменить запись.
+            # Явно обрабатываем AppointmentNotFoundError — показываем понятное сообщение вместо общей ошибки.
             await asyncio.to_thread(appt_service.admin_cancel_appointment, appt_id)
             await callback.message.edit_text(
                 MessageFormatter.admin_cancel_success(appt_id, appt.client_name if appt else "?"),
@@ -178,6 +180,13 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                         "Не удалось уведомить клиента user_id=%s об отмене: %s",
                         appt.user_id, notify_exc,
                     )
+        except _ApptNotFoundError:
+            # FIXED H-03: запись уже была отменена (race condition) — показываем понятное сообщение
+            logger.warning("admin_confirm_cancel: appointment #%s already cancelled (race condition)", appt_id)
+            await callback.message.edit_text(
+                "ℹ️ Запись уже была отменена (возможно, клиент отменил сам).",
+                reply_markup=None,
+            )
         except Exception as exc:
             logger.error("Ошибка отмены записи #%s: %s", appt_id, exc)
             await callback.message.edit_text(MessageFormatter.error_general())
@@ -342,6 +351,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
     @router.callback_query(F.data.startswith("admin_confirm_del_slot:"))
     async def admin_confirm_delete_slot(callback: CallbackQuery) -> None:
+        # FIXED L-01: добавлена проверка прав администратора (ранее отсутствовала)
+        if not _is_admin(callback.from_user.id):
+            await callback.answer("Нет прав администратора.", show_alert=True)
+            return
         _, date_str, time_str = callback.data.split(":", 2)
         try:
             await sched_service.remove_slot(date_str, time_str)
@@ -440,19 +453,42 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await callback.answer("Рассылка запущена...")
         import asyncio
         try:
-            # FIXED: получаем только активные записи (не отменённые)
-            appts = await asyncio.to_thread(appt_service.get_all_active)
-            user_ids = {a.user_id for a in appts}
+            # FIXED H-02: рассылаем ВСЕМ пользователям из таблицы users (не только с активными записями)
+            # Получаем всех пользователей через DatabaseManager напрямую
+            container = callback.message.bot.get("container") if hasattr(callback.message.bot, "get") else None
+            all_user_ids: set[int] = set()
+
+            # Пробуем получить всех пользователей из таблицы users (если она заполнена через middleware)
+            try:
+                db = getattr(container, "_db", None) if container else None
+                if db is not None:
+                    def _get_all_users():
+                        with db.read_connection() as conn:
+                            rows = conn.execute("SELECT user_id FROM users").fetchall()
+                            return {row[0] for row in rows}
+                    all_user_ids = await asyncio.to_thread(_get_all_users)
+            except Exception:
+                logger.warning("Failed to get users from users table, falling back to appointments")
+
+            # Fallback: если таблица users пуста — берём из активных записей
+            if not all_user_ids:
+                appts = await asyncio.to_thread(appt_service.get_all_active)
+                all_user_ids = {a.user_id for a in appts}
+
             sent = 0
-            for uid in user_ids:
+            failed = 0
+            for uid in all_user_ids:
                 try:
                     await callback.message.bot.send_message(uid, text, parse_mode="HTML")
                     sent += 1
-                    # FIXED: соблюдаем лимиты Telegram API (1 сообщение в секунду на пользователя)
-                    await asyncio.sleep(0.1)
-                except Exception:
-                    logger.exception("Failed to send broadcast to %s", uid)
-            await callback.message.edit_text(f"Рассылка завершена. Отправлено сообщений: {sent}")
+                    # Соблюдаем лимиты Telegram API
+                    await asyncio.sleep(0.05)
+                except Exception as exc:
+                    failed += 1
+                    logger.warning("Failed to send broadcast to %s: %s", uid, exc)
+            await callback.message.edit_text(
+                f"Рассылка завершена.\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}"
+            )
         except Exception as exc:
             logger.exception("Broadcast failed: %s", exc)
             await callback.message.edit_text(MessageFormatter.error_general())

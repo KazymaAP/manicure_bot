@@ -9,7 +9,7 @@ Async-хендлеры вызывают их напрямую (sync в async con
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime as _datetime, timedelta
 import sqlite3
 
 from src.application.dto.booking_dto import BookingResultDTO, CreateBookingDTO
@@ -107,8 +107,9 @@ class AppointmentService:
                     raise SlotAlreadyBookedError(dto.date, dto.time)
 
                 # 4) вставляем запись в appointments в той же транзакции
+                # FIXED C-05: убран антипаттерн __import__("datetime") внутри горячего пути/транзакции
                 created_at = (
-                    dto.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(dto, "created_at", None) else __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    dto.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(dto, "created_at", None) else _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 )
                 ins = conn.execute(
                     "INSERT INTO appointments (user_id, username, client_name, phone, date, time, created_at, comment, service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

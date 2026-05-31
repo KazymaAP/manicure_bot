@@ -40,6 +40,11 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     # ── «Записаться» ──────────────────────────────────────────────────────
     @router.message(F.text == "📅 Записаться")
     async def start_booking(message: Message, state: FSMContext) -> None:
+        # FIXED H-01: сбрасываем предыдущие данные FSM перед началом нового потока записи.
+        # Без этого прошлые данные (client_name, phone, transfer_source и т.д.)
+        # остаются в state и вызывают некорректное поведение при повторном нажатии.
+        await state.clear()
+
         # FIXED: проверяем подписку при ключевых действиях
         if settings.required_channel and message.from_user.id not in settings.admin_ids:
             try:
@@ -314,11 +319,13 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             # Уведомить администратора о новой записи
             await notif_service.notify_admin_new_booking(appointment_id)
             # Запланировать напоминание клиенту (scheduler — async-safe)
+            # FIXED C-06: передаём timezone из settings для корректного расчёта времени
             reminder_service.schedule_reminder(
                 appointment_id=appointment_id,
                 user_id=user_id,
                 date_str=data["chosen_date"],
                 time_str=data["chosen_time"],
+                timezone_str=settings.timezone,
             )
             is_admin = user_id in settings.admin_ids
             portfolio = _get_portfolio(settings)

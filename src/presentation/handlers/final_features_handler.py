@@ -185,9 +185,9 @@ def setup_final_features_router(container: Container) -> Router:
 
     # ── #38 Архивирование старых записей ───────────────────────────────────
     async def archive_old_appointments() -> None:
-        """FIXED: фича #38 — автоудаление/архивирование записей старше 90 дней.
+        """FIXED L-02: фича #38 — автоудаление/архивирование записей старше 90 дней.
 
-        Должна вызваться из APScheduler (раз в неделю).
+        ВАЖНО: эта функция регистрируется в APScheduler при вызове register_scheduled_jobs().
         """
         import asyncio
 
@@ -212,8 +212,9 @@ def setup_final_features_router(container: Container) -> Router:
 
     # ── #24 Уведомление администратора об отсутствии слотов ────────────────
     async def check_insufficient_slots() -> None:
-        """FIXED: фича #24 — ежедневно проверяет количество свободных дней.
+        """FIXED L-02: фича #24 — ежедневно проверяет количество свободных дней.
 
+        ВАЖНО: эта функция регистрируется в APScheduler при вызове register_scheduled_jobs().
         Если < 3 свободных дней — отправляет уведомление администратору.
         """
         try:
@@ -262,7 +263,9 @@ def setup_final_features_router(container: Container) -> Router:
 
             results = []
             for date_str in matching_dates[:5]:
-                times = await asyncio.to_thread(sched_service.get_available_times, date_str)
+                # FIXED C-02: метода get_available_times не существует, используем get_available_slots
+                slot_objs = await sched_service.get_available_slots(date_str)
+                times = [s.time for s in slot_objs]
                 slots_text = ", ".join(times[:3]) if times else "нет слотов"
 
                 result = InlineQueryResultArticle(
@@ -283,5 +286,35 @@ def setup_final_features_router(container: Container) -> Router:
         except Exception as exc:
             logger.exception("Inline search error: %s", exc)
             await inline_query.answer([])
+
+    def register_scheduled_jobs(scheduler) -> None:
+        """FIXED L-02: регистрирует archive_old_appointments и check_insufficient_slots в APScheduler.
+
+        Вызывать после запуска планировщика (reminder_service.start()).
+
+        Args:
+            scheduler: Экземпляр APScheduler (AsyncIOScheduler).
+        """
+        try:
+            from apscheduler.triggers.cron import CronTrigger  # type: ignore
+
+            scheduler.add_job(
+                archive_old_appointments,
+                trigger=CronTrigger(day_of_week="sun", hour=4, minute=0),
+                id="final_archive_old_appointments",
+                replace_existing=True,
+            )
+            scheduler.add_job(
+                check_insufficient_slots,
+                trigger=CronTrigger(hour=11, minute=0),
+                id="final_check_insufficient_slots",
+                replace_existing=True,
+            )
+            logger.info("final_features scheduled jobs registered (archive + insufficient_slots check)")
+        except Exception:
+            logger.exception("Failed to register final_features scheduled jobs")
+
+    # Сохраняем функцию регистрации как атрибут роутера для внешнего вызова
+    router.register_scheduled_jobs = register_scheduled_jobs  # type: ignore
 
     return router

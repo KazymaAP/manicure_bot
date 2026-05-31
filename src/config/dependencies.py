@@ -131,18 +131,27 @@ class Container:
         )
 
         # FIXED: создаём AppointmentService с callback для отправки уведомлений waitlist
+        # FIXED M-06: хранилище ссылок на fire-and-forget таски — без этого GC может удалить таск до завершения
+        _pending_tasks: set = set()
+
         def notify_waitlist_available(user_id: int, date: str, time: str) -> None:
-            """Callback для отправки уведомлений пользователям из waitlist о свободных слотах."""
+            """Callback для отправки уведомлений пользователям из waitlist о свободных слотах.
+
+            FIXED M-06: сохраняем ссылку на таск в _pending_tasks чтобы GC не удалил его до завершения.
+            """
             import asyncio
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 # Нет running loop — в тесте или в синхронном контексте
                 return
-            # Создаём таск для отправки уведомления (не ждём результата)
-            asyncio.create_task(
+            # Создаём таск и сохраняем ссылку
+            task = asyncio.create_task(
                 self._notification_service.notify_waitlist_slot_available(user_id, date, time)
             )
+            _pending_tasks.add(task)
+            # Автоматически удаляем ссылку после завершения
+            task.add_done_callback(_pending_tasks.discard)
 
         self._appointment_service = AppointmentService(
             appointment_repo=self._appointment_repo,
@@ -168,6 +177,7 @@ class Container:
         except Exception:
             jobstore_url = None
 
+        # FIXED C-06: передаём timezone для корректного расчёта времени напоминаний
         self._reminder_service = ReminderService(
             appointment_service=self._appointment_service,
             notification_service=self._notification_service,
@@ -175,6 +185,7 @@ class Container:
             jobstore_url=jobstore_url,
             admin_ids=self._settings.admin_ids,
             backup_service=backup_service,
+            timezone=self._settings.timezone,
         )
         logger.info("All services built successfully.")
 

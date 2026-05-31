@@ -51,7 +51,8 @@ class LoggingMiddleware(BaseMiddleware):
 
         logger.debug("Processing %s from user_id=%s", update_type, user_id)
 
-        # FIXED: сохраняем/обновляем пользователя в таблице users
+        # FIXED H-08: трекинг пользователя в БД выполняется через asyncio.to_thread
+        # чтобы не блокировать event loop на время синхронного SQLite-вызова.
         if user_id and from_user:
             try:
                 container = data.get("container")
@@ -59,26 +60,28 @@ class LoggingMiddleware(BaseMiddleware):
                     db = getattr(container, "_db", None)
                     if db is not None:
                         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        with db.transaction() as conn:
-                            conn.execute(
-                                """
-                                INSERT INTO users (user_id, username, first_name, last_name, created_at, last_seen)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(user_id) DO UPDATE SET
-                                    username = excluded.username,
-                                    first_name = excluded.first_name,
-                                    last_name = excluded.last_name,
-                                    last_seen = excluded.last_seen
-                                """,
-                                (
-                                    user_id,
-                                    getattr(from_user, "username", None),
-                                    getattr(from_user, "first_name", None),
-                                    getattr(from_user, "last_name", None),
-                                    now_str,
-                                    now_str,
+                        _uid = user_id
+                        _uname = getattr(from_user, "username", None)
+                        _fname = getattr(from_user, "first_name", None)
+                        _lname = getattr(from_user, "last_name", None)
+
+                        def _track_user() -> None:
+                            with db.transaction() as conn:
+                                conn.execute(
+                                    """
+                                    INSERT INTO users (user_id, username, first_name, last_name, created_at, last_seen)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                    ON CONFLICT(user_id) DO UPDATE SET
+                                        username = excluded.username,
+                                        first_name = excluded.first_name,
+                                        last_name = excluded.last_name,
+                                        last_seen = excluded.last_seen
+                                    """,
+                                    (_uid, _uname, _fname, _lname, now_str, now_str)
                                 )
-                            )
+
+                        import asyncio
+                        await asyncio.to_thread(_track_user)
             except Exception:
                 # Не блокируем обработку при ошибке трекинга
                 logger.debug("Failed to track user %s in users table", user_id, exc_info=True)

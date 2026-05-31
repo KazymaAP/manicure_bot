@@ -6,9 +6,14 @@ python-dotenv==1.0.1
 SQLAlchemy==2.0.20
 # FIXED: добавить aiohttp для health_server.py
 aiohttp==3.9.1
+# FIXED M-11: добавить tzdata для корректной работы ZoneInfo с timezone (Python 3.9+)
+# Необходим на Linux/Docker системах без встроенной базы timezone
+tzdata==2024.1
 # FIXED: добавить тестовые зависимости (используются в GitHub Actions и локально)
 pytest==7.4.3
 pytest-asyncio==0.23.2
 # FIXED: добавить mypy для type checking (используется в GitHub Actions)
 mypy==1.7.1
+# FIXED M-11: types-aiohttp — stub-пакет только для mypy, не нужен в runtime
+# Оставлен для совместимости с CI/mypy, но не является runtime-зависимостью
 types-aiohttp==3.9.2

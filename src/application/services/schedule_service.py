@@ -272,21 +272,34 @@ class ScheduleService:
         return result
 
     async def get_nearest_slots_async(self, limit: int = 5) -> list[tuple[str, str]]:
-        """Async-обёртка для get_nearest_free_slots."""
-        return self.get_nearest_free_slots(limit=limit)
+        """Async-обёртка для get_nearest_free_slots.
+
+        FIXED M-02: обвёрнут в asyncio.to_thread — get_nearest_free_slots выполняет
+        N синхронных SQL-запросов и блокировал event loop при большом horizon.
+        """
+        import asyncio
+        return await asyncio.to_thread(self.get_nearest_free_slots, limit)
 
     async def join_waitlist(self, user_id: int, date: str) -> bool:
         """Добавляет пользователя в лист ожидания (асинхронная оболочка)."""
         return self._schedule_repo.join_waitlist(user_id, date)
 
-    # FIXED: добавлен метод для вывода ближайших свободных слотов без открытия календаря и поддержка waitlist.
+    # FIXED M-10: добавлен метод для вывода ближайших свободных слотов без открытия календаря и поддержка waitlist.
     async def get_all_working_dates(self) -> list[str]:
-        """Async-обёртка: возвращает все рабочие даты в горизонте настроек (days_ahead)."""
-        days = self._schedule_repo.get_all_days_in_range(
-            _date.today().isoformat(),
-            (_date.today() + timedelta(days=self._days_ahead)).isoformat(),
-        )
-        return [d.date for d in days]
+        """Async-обёртка: возвращает все рабочие даты в горизонте настроек (days_ahead).
+
+        FIXED M-10: синхронный SQL-запрос обёрнут в asyncio.to_thread.
+        """
+        import asyncio
+
+        def _sync() -> list[str]:
+            days = self._schedule_repo.get_all_days_in_range(
+                _date.today().isoformat(),
+                (_date.today() + timedelta(days=self._days_ahead)).isoformat(),
+            )
+            return [d.date for d in days]
+
+        return await asyncio.to_thread(_sync)
 
     async def get_slots_for_date(self, date_str: str) -> list[TimeSlot]:
         """Async-обёртка для get_all_slots."""

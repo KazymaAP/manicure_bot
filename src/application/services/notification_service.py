@@ -229,6 +229,10 @@ class NotificationService:
     async def _safe_send(self, chat_id: int, text: str) -> bool:
         """Безопасно отправляет простое текстовое сообщение.
 
+        FIXED архитектурное замечание: TelegramForbiddenError (бот заблокирован пользователем)
+        логируется как WARNING — пользователь сам отозвал доступ, это не ошибка приложения.
+        Остальные ошибки — ERROR. Можно расширить: при Forbidden удалять пользователя из рассылки.
+
         Args:
             chat_id: ID чата.
             text: Текст сообщения (HTML).
@@ -240,5 +244,13 @@ class NotificationService:
             await self._bot.send_message(chat_id, text, parse_mode="HTML")
             return True
         except Exception as exc:
-            logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
+            exc_name = type(exc).__name__
+            # FIXED: TelegramForbiddenError — бот заблокирован пользователем, это ожидаемо
+            if "Forbidden" in exc_name or "BotBlocked" in exc_name or "UserDeactivated" in exc_name:
+                logger.warning(
+                    "Cannot send message to chat_id=%s — bot blocked or user deactivated: %s",
+                    chat_id, exc,
+                )
+            else:
+                logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
             return False

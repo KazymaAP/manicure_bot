@@ -35,12 +35,14 @@ class ReminderService:
         jobstore_url: str | None = None,
         admin_ids: list[int] | None = None,
         backup_service: Any | None = None,
+        timezone: str = "UTC",
     ) -> None:
         self._appointment_service = appointment_service
         self._notification_service = notification_service
         self._hours_before = hours_before
         self._admin_ids = admin_ids or []
         self._backup_service = backup_service
+        self._timezone = timezone  # FIXED C-06: храним timezone для корректного расчёта напоминаний
 
         # Инициализация планировщика: предпочитаем SQLAlchemyJobStore (персистентность), иначе MemoryJobStore
         try:
@@ -87,13 +89,37 @@ class ReminderService:
         user_id: int,
         date_str: str,
         time_str: str,
+        timezone_str: str | None = None,
     ) -> None:
-        # Время визита в UTC (naive -> считаем как локальное время и переводим в UTC)
+        """Планирует напоминания для записи.
+
+        FIXED C-06: время в БД хранится в локальной timezone (не UTC).
+        Используем timezone из settings для корректного перевода в UTC при планировании.
+        Если timezone_str не передан — используем UTC как безопасный дефолт.
+        """
         from datetime import timezone
 
         appt_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-        # Привязываем к UTC — FIXED: используем timezone-aware datetime
-        appt_dt = appt_dt.replace(tzinfo=timezone.utc)
+
+        # FIXED C-06: используем переданную timezone вместо принудительного UTC
+        if timezone_str and timezone_str != "UTC":
+            try:
+                try:
+                    from zoneinfo import ZoneInfo  # Python 3.9+
+                except ImportError:
+                    from backports.zoneinfo import ZoneInfo  # type: ignore
+                local_tz = ZoneInfo(timezone_str)
+                appt_dt = appt_dt.replace(tzinfo=local_tz)
+            except Exception:
+                # При ошибке загрузки timezone — логируем и используем UTC
+                logger.warning(
+                    "Unknown timezone %r, falling back to UTC for reminder scheduling",
+                    timezone_str,
+                )
+                appt_dt = appt_dt.replace(tzinfo=timezone.utc)
+        else:
+            appt_dt = appt_dt.replace(tzinfo=timezone.utc)
+
         now = datetime.now(tz=timezone.utc)
         # Планируем несколько напоминаний: основной self._hours_before и дополнительные 2h и 1h
         hours_set = {int(self._hours_before), 2, 1}
@@ -138,11 +164,13 @@ class ReminderService:
                 logger.warning("Skipping scheduling reminder for appointment without id: %s", appt)
                 continue
             try:
+                # FIXED C-06: передаём timezone для корректного расчёта времени напоминания
                 self.schedule_reminder(
                     appointment_id=appt.id,
                     user_id=appt.user_id,
                     date_str=appt.date,
                     time_str=appt.time,
+                    timezone_str=self._timezone,
                 )
                 restored += 1
             except Exception:
@@ -204,23 +232,31 @@ class ReminderService:
             logger.exception("Weekly archive job failed")
 
     async def _insufficient_slots_check_job(self) -> None:
-        """Проверяет количество доступных слотов и уведомляет администраторов."""
+        """Проверяет количество доступных слотов и уведомляет администраторов.
+
+        FIXED C-01: убран некорректный asyncio.to_thread(get_connection).
+        Теперь используем schedule_repo напрямую через asyncio.to_thread.
+        """
         try:
-            from src.application.services.schedule_service import ScheduleService
             from datetime import date as _date, timedelta
             import asyncio
 
             today = _date.today()
             days_ahead = 30
             to_date = (today + timedelta(days=days_ahead)).isoformat()
-            available_dates = await asyncio.to_thread(
-                self._appointment_service._appointment_repo._db.get_connection
-            )
-            # Используем notification_service для простоты
+
+            # FIXED: получаем schedule_repo из appointment_service (не вызываем get_connection)
             sched_repo = getattr(self._appointment_service, "_schedule_repo", None)
             if sched_repo is None:
+                logger.warning("_insufficient_slots_check_job: schedule_repo not found")
                 return
-            available = sched_repo.get_available_dates_in_range(today.isoformat(), to_date)
+
+            # Запускаем синхронный SQL-вызов в отдельном потоке (не блокируем event loop)
+            available = await asyncio.to_thread(
+                sched_repo.get_available_dates_in_range,
+                today.isoformat(),
+                to_date
+            )
             free_days = len(available)
             if free_days < 3:
                 text = (

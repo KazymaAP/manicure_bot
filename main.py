@@ -72,7 +72,8 @@ async def main() -> None:
     from src.presentation.handlers.extended_features_handler import setup_extended_features_router
     from src.presentation.handlers.final_features_handler import setup_final_features_router
     dp.include_router(setup_extended_features_router(container))
-    dp.include_router(setup_final_features_router(container))
+    final_router = setup_final_features_router(container)
+    dp.include_router(final_router)
 
     # ── Планировщик напоминаний ───────────────────────────────────────────
     reminder_service = container.reminder_service
@@ -83,6 +84,10 @@ async def main() -> None:
     reminder_service.schedule_daily_backup(hour=2, minute=0)   # 2:00 UTC
     reminder_service.schedule_weekly_archive(hour=3, minute=0) # Вс 3:00 UTC
     reminder_service.schedule_insufficient_slots_check(hour=10, minute=0)  # 10:00 UTC
+    # FIXED L-02: регистрируем задачи из final_features_handler (archive + insufficient_slots)
+    register_fn = getattr(final_router, "register_scheduled_jobs", None)
+    if register_fn:
+        register_fn(reminder_service._scheduler)
     logger.info("Планировщик напоминаний запущен")
 
     # ── Health Server (для мониторинга) ────────────────────────────────────
@@ -90,9 +95,11 @@ async def main() -> None:
     try:
         from src.infrastructure.http.health_server import HealthServer
 
+        # FIXED H-04: используем settings.health_port вместо небезопасного os.getenv()
+        # Это проходит Pydantic-валидацию и не упадёт с ValueError при неверном значении
         health_server = HealthServer(
             appointment_service=container.appointment_service,
-            port=int(__import__("os").getenv("HEALTH_PORT", "8080")),
+            port=settings.health_port,
         )
         await health_server.setup()
     except ImportError:
