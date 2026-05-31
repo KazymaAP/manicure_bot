@@ -31,9 +31,64 @@ class AdminKeyboard:
         )
         builder.row(
             KeyboardButton(text="📊 Статистика"),
+            KeyboardButton(text="📢 Рассылка"),
+        )
+        builder.row(
+            KeyboardButton(text="⬇️ Экспорт CSV"),
+            KeyboardButton(text="📅 Открыть неделю"),
+        )
+        builder.row(
+            KeyboardButton(text="🔍 Найти клиента"),
+            KeyboardButton(text="🛑 Черный список"),
+        )
+        builder.row(
             KeyboardButton(text="🏠 Главное меню"),
         )
         return builder.as_markup(resize_keyboard=True, one_time_keyboard=False)
+
+    @staticmethod
+    def broadcast_confirm(text_preview: str) -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="✅ Отправить всем", callback_data=f"admin_broadcast_send"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_broadcast_cancel"),
+        )
+        return builder.as_markup()
+
+    @staticmethod
+    def export_csv_confirm() -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="✅ Экспорт за период", callback_data="admin_export_csv"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back_main"),
+        )
+        return builder.as_markup()
+
+    @staticmethod
+    def open_week_confirm() -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="📅 Открыть 7 дней", callback_data="admin_open_week"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back_main"),
+        )
+        return builder.as_markup()
+
+    @staticmethod
+    def blacklist_menu() -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="➕ Заблокировать", callback_data="admin_block_user"),
+            InlineKeyboardButton(text="➖ Разблокировать", callback_data="admin_unblock_user"),
+        )
+        builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_main"))
+        return builder.as_markup()
+
+    @staticmethod
+    def search_client_prompt() -> InlineKeyboardMarkup:
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="🔎 Найти клиента", callback_data="admin_find_client"))
+        builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_main"))
+        return builder.as_markup()
 
     @staticmethod
     def cancel() -> ReplyKeyboardMarkup:
@@ -121,7 +176,6 @@ class AdminKeyboard:
         return builder.as_markup()
 
     # ── Кнопка «Отмена» для FSM шагов ───────────────────────────────────
-    # ── Фильтры для просмотра записей ────────────────────────────────────
     @staticmethod
     def appointments_filter() -> InlineKeyboardMarkup:
         builder = InlineKeyboardBuilder()
@@ -134,4 +188,33 @@ class AdminKeyboard:
             InlineKeyboardButton(text="🗂 Все", callback_data="admin_filter:all"),
         )
         builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_main"))
+        return builder.as_markup()
+
+    # ── Меню управления шаблонами расписания ─────────────────────────────
+    @staticmethod
+    def templates_menu() -> InlineKeyboardMarkup:
+        """FIXED: меню для сохранения/применения шаблонов расписания."""
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="➕ Сохранить шаблон", callback_data="admin_save_template"),
+            InlineKeyboardButton(text="➖ Удалить шаблон", callback_data="admin_delete_template"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="📋 Применить шаблон", callback_data="admin_apply_template"),
+            InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_main"),
+        )
+        return builder.as_markup()
+
+    # ── Меню отмены всех записей на дату ─────────────────────────────────
+    @staticmethod
+    def cancel_all_confirm(date_str: str, count: int) -> InlineKeyboardMarkup:
+        """FIXED: подтверждение массовой отмены."""
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(
+                text=f"✅ Отменить {count} записей",
+                callback_data=f"confirm_cancel_all:{date_str}",
+            ),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back_main"),
+        )
         return builder.as_markup()

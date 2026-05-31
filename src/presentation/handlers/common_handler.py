@@ -153,26 +153,62 @@ def setup_common_router(container: Container) -> Router:
 
     @router.message(CommandStart())
     async def cmd_start(message: Message) -> None:
+        """FIXED: фича #17 — персональное приветствие с именем клиента."""
+        import asyncio
+
         user_id = message.from_user.id
         is_subscribed = await _check_subscription(user_id, message.bot)
 
         if not is_subscribed:
+            # FIXED: предлагаем пользователю кнопку подписки с ссылкой на канал
             await message.answer(
                 MessageFormatter.error_subscription_required(settings.required_channel),
+                reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
                 parse_mode="HTML",
             )
             return
 
         is_admin = user_id in settings.admin_ids
         portfolio = _get_portfolio(settings)
+
+        # FIXED: пытаемся получить последнюю запись для персонального приветствия
+        appt_service = container.appointment_service
+        greeting = "👋 Добро пожаловать!"
+        try:
+            last_appt = await asyncio.to_thread(appt_service.get_last_appointment, user_id)
+            if last_appt and last_appt.client_name:
+                greeting = f"👋 Добро пожаловать снова, <b>{last_appt.client_name}</b>!"
+        except Exception:
+            pass
+
         await message.answer(
-            MessageFormatter.welcome(message.from_user.username),
+            greeting + "\n\n" + MessageFormatter.welcome(message.from_user.username),
             reply_markup=MainMenuKeyboard.main(
                 is_admin=is_admin,
                 portfolio_url=portfolio,
             ),
             parse_mode="HTML",
         )
+
+    @router.callback_query(F.data == "check_subscription")
+    async def check_subscription_cb(callback: CallbackQuery) -> None:
+        """Обработчик кнопки 'Я подписался' — перепроверяет подписку и открывает бота."""
+        user_id = callback.from_user.id
+        is_subscribed = await _check_subscription(user_id, callback.bot)
+        if is_subscribed:
+            is_admin = user_id in settings.admin_ids
+            portfolio = _get_portfolio(settings)
+            await callback.message.edit_text(
+                MessageFormatter.welcome(callback.from_user.username),
+                reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
+                parse_mode="HTML",
+            )
+            await callback.answer("Проверка пройдена — добро пожаловать!")
+        else:
+            # Предложим снова подписаться
+            await callback.answer("Вы всё ещё не подписаны. Нажмите кнопку '📢 Подписаться' и затем '✅ Я подписался'", show_alert=True)
+            await callback.message.edit_reply_markup(reply_markup=MainMenuKeyboard.subscribe(settings.required_channel))
+
 
     @router.message(Command("help"))
     async def cmd_help(message: Message) -> None:

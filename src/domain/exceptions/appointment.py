@@ -27,3 +27,9 @@ class MaxAppointmentsReachedError(DomainError):
     def __init__(self, max_count: int) -> None:
         super().__init__(f"Maximum number of appointments ({max_count}) reached")
         self.max_count = max_count
+
+
+class BlacklistedUserError(DomainError):
+    def __init__(self, user_id: int) -> None:
+        super().__init__(f"User {user_id} is blacklisted and cannot create appointments")
+        self.user_id = user_id

@@ -6,12 +6,17 @@ from aiogram.fsm.state import State, StatesGroup
 
 class BookingFSM(StatesGroup):
     """Состояния FSM для процесса записи клиента."""
+    choosing_service = State()
     choosing_date = State()
     choosing_time = State()
     entering_name = State()
     entering_phone = State()
     entering_comment = State()
     confirming = State()
+    # FIXED: добавлены состояния для переноса и waitlist
+    transferring_choosing_date = State()
+    transferring_choosing_time = State()
+    transferring_confirming = State()
 
 
 class AdminFSM(StatesGroup):
@@ -21,3 +26,13 @@ class AdminFSM(StatesGroup):
     confirming_cancel = State()
     waiting_for_date = State()
     waiting_for_time = State()
+    # FIXED: дополнительные состояния для админ-фич
+    waiting_for_broadcast = State()
+    waiting_for_export_range = State()
+    waiting_for_template_name = State()
+    waiting_for_template_schedule = State()
+    waiting_for_blacklist_id = State()
+    waiting_for_block_reason = State()
+    waiting_for_search_query = State()
+    confirming_cancel_all = State()
+    confirming_cancel_all_date = State()

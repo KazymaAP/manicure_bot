@@ -34,6 +34,26 @@ class BookingKeyboard:
         return builder.as_markup()
 
     @staticmethod
+    def service_selection() -> InlineKeyboardMarkup:
+        """Кнопки выбора типа услуги (маникюр/педикюр/покрытие)."""
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="💅 Маникюр", callback_data="service:manicure"),
+            InlineKeyboardButton(text="🦶 Педикюр", callback_data="service:pedicure"),
+        )
+        builder.row(InlineKeyboardButton(text="✨ Покрытие", callback_data="service:coating"))
+        return builder.as_markup()
+
+    @staticmethod
+    def use_previous_data() -> InlineKeyboardMarkup:
+        """Кнопка автозаполнения предыдущими данными клиента."""
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="Использовать прошлые данные", callback_data="use_prev"))
+        return builder.as_markup()
+
+    # FIXED: добавлены клавиатуры выбора услуги и автозаполнения прошлых данных для удобства UX.
+
+    @staticmethod
     def confirm() -> InlineKeyboardMarkup:
         """Кнопки подтверждения / отмены записи."""
         builder = InlineKeyboardBuilder()
@@ -69,7 +89,7 @@ class BookingKeyboard:
 
     @staticmethod
     def cancel_appointment_list(appointments: list) -> InlineKeyboardMarkup:
-        """Кнопки для отмены записей из списка.
+        """Кнопки для отмены/переноса записей из списка.
 
         Args:
             appointments: Список записей.
@@ -80,10 +100,16 @@ class BookingKeyboard:
                 InlineKeyboardButton(
                     text=f"❌ {appt.date} {appt.time}",
                     callback_data=f"cancel_appt:{appt.id if appt.id is not None else 0}",
-                )
+                ),
+                InlineKeyboardButton(
+                    text=f"🔄 Перенести",
+                    callback_data=f"transfer_appt:{appt.id if appt.id is not None else 0}",
+                ),
             )
         builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return builder.as_markup()
+
+    # FIXED: добавлена кнопка переноса рядом с кнопкой отмены для удобства клиента.
 
     @staticmethod
     def after_cancel() -> InlineKeyboardMarkup:

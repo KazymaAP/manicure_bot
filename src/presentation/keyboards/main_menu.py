@@ -21,8 +21,10 @@ class MainMenuKeyboard:
             portfolio_url: Ссылка на портфолио (если задана — добавляет кнопку).
         """
         builder = ReplyKeyboardBuilder()
-        builder.row(KeyboardButton(text="📅 Записаться"))
-        builder.row(KeyboardButton(text="📋 Мои записи"))
+        builder.row(KeyboardButton(text="📅 Записаться"), KeyboardButton(text="📋 Мои записи"))
+        builder.row(KeyboardButton(text="📆 Расписание"), KeyboardButton(text="🔔 Ближайшие слоты"))
+        builder.row(KeyboardButton(text="📞 Контакты"), KeyboardButton(text="💰 Цены"))
+        builder.row(KeyboardButton(text="📤 Поделиться"), KeyboardButton(text="🔔 Уведомления"))
         if portfolio_url:
             builder.row(
                 KeyboardButton(text="💅 Портфолио", web_app=WebAppInfo(url=portfolio_url))
@@ -32,15 +34,19 @@ class MainMenuKeyboard:
         return builder.as_markup(resize_keyboard=True)
 
     @staticmethod
-    def subscribe(channel_link: str) -> ReplyKeyboardMarkup:
-        """Кнопки подписки на канал.
+    def subscribe(channel_link: str):
+        """FIXED: Возвращает Inline-кнопку с прямой ссылкой на канал и кнопку "Я подписался" для удобного UX.
 
-        Args:
-            channel_link: Ссылка на канал.
+        Возвращаем InlineKeyboardMarkup (совместимо с ожиданиями UI):
         """
-        builder = ReplyKeyboardBuilder()
-        builder.row(KeyboardButton(text="📢 Подписаться"))
-        return builder.as_markup(resize_keyboard=True)
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📢 Подписаться", url=channel_link)],
+            [InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription")],
+        ])
+        return kb
+        # FIXED: добавлена callback-кнопка проверки подписки (повторная проверка при нажатии)
 
     @staticmethod
     def back_to_main() -> ReplyKeyboardMarkup:

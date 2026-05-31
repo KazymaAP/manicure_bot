@@ -104,11 +104,15 @@ class Container:
         self._schedule_repo = ScheduleRepository(self._db)
 
         # Сервисы (порядок важен: notification нужен для reminder)
-        self._appointment_service = AppointmentService(
-            appointment_repo=self._appointment_repo,
-            schedule_repo=self._schedule_repo,
-            max_per_user=self._settings.max_appointments_per_user,
-        )
+        # Подготовим mapping name->duration (минутах) для AppointmentService
+        service_durations = {}
+        for name, info in (self._settings.services or {}).items():
+            try:
+                duration = int(info.get("duration", 0)) if isinstance(info, dict) else int(info)
+            except Exception:
+                duration = 0
+            service_durations[name] = duration
+
         # Загружаем service_name из config.json (кэшированный)
         config = _load_config_json()
         service_name = config.get("bot", {}).get("service_name", "маникюр")
@@ -125,10 +129,52 @@ class Container:
             appointment_repo=self._appointment_repo,
             service_name=service_name,
         )
+
+        # FIXED: создаём AppointmentService с callback для отправки уведомлений waitlist
+        def notify_waitlist_available(user_id: int, date: str, time: str) -> None:
+            """Callback для отправки уведомлений пользователям из waitlist о свободных слотах."""
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # Нет running loop — в тесте или в синхронном контексте
+                return
+            # Создаём таск для отправки уведомления (не ждём результата)
+            asyncio.create_task(
+                self._notification_service.notify_waitlist_slot_available(user_id, date, time)
+            )
+
+        self._appointment_service = AppointmentService(
+            appointment_repo=self._appointment_repo,
+            schedule_repo=self._schedule_repo,
+            max_per_user=self._settings.max_appointments_per_user,
+            service_durations=service_durations,
+            notification_callback=notify_waitlist_available,
+        )
+
+        # FIXED: создаём BackupService
+        from src.application.services.backup_service import BackupService
+        backup_service = BackupService(
+            db_path=self._settings.db_path,
+            backup_dir="data/backups",
+            keep_count=7,
+        )
+
+        # Создаём ReminderService с персистентным jobstore (sqlite на том же файле БД) и параметрами для дайджеста/бэкапа
+        jobstore_url = None
+        try:
+            # абсолютный путь к sqlite для SQLAlchemyJobStore
+            jobstore_url = f"sqlite:///{os.path.abspath(self._settings.db_path)}"
+        except Exception:
+            jobstore_url = None
+
         self._reminder_service = ReminderService(
             appointment_service=self._appointment_service,
             notification_service=self._notification_service,
             hours_before=self._settings.reminder_hours_before,
+            jobstore_url=jobstore_url,
+            admin_ids=self._settings.admin_ids,
+            backup_service=backup_service,
         )
         logger.info("All services built successfully.")
 

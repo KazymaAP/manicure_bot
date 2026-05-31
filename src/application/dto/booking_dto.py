@@ -19,6 +19,7 @@ class CreateBookingDTO:
     time: str
     username: str | None = None
     comment: str | None = None
+    service: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

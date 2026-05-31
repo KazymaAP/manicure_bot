@@ -40,6 +40,7 @@ class Appointment:
     reminder_sent: bool = field(default=False)
     status: AppointmentStatus = field(default=AppointmentStatus.ACTIVE)
     comment: str | None = field(default=None)
+    service: str | None = field(default=None)
 
     def __post_init__(self) -> None:
         if self.created_at is None:
@@ -97,6 +98,7 @@ class Appointment:
             reminder_sent=bool(row.get("reminder_sent", 0)),
             status=AppointmentStatus(row.get("is_cancelled", 0)),
             comment=row.get("comment"),
+        service=row.get("service"),
         )
 
     def to_dict(self) -> dict:
@@ -113,4 +115,5 @@ class Appointment:
             "reminder_sent": int(self.reminder_sent),
             "is_cancelled": int(self.status),
             "comment": self.comment,
+            "service": self.service,
         }

@@ -235,11 +235,36 @@ class ScheduleService:
         """Async-обёртка для get_free_slots."""
         return self._schedule_repo.get_free_slots(date_str)
 
+    def get_nearest_free_slots(self, limit: int = 5) -> list[tuple[str, str]]:
+        """Возвращает ближайшие свободные слоты (date, time) в пределах horizon."""
+        from datetime import date as _date, timedelta
+
+        result: list[tuple[str, str]] = []
+        today = _date.today()
+        for day_offset in range(0, self._days_ahead + 1):
+            d = today + timedelta(days=day_offset)
+            date_str = d.isoformat()
+            slots = self._schedule_repo.get_free_slots(date_str)
+            for s in slots:
+                result.append((date_str, s.time))
+                if len(result) >= limit:
+                    return result
+        return result
+
+    async def get_nearest_slots_async(self, limit: int = 5) -> list[tuple[str, str]]:
+        """Async-обёртка для get_nearest_free_slots."""
+        return self.get_nearest_free_slots(limit=limit)
+
+    async def join_waitlist(self, user_id: int, date: str) -> bool:
+        """Добавляет пользователя в лист ожидания (асинхронная оболочка)."""
+        return self._schedule_repo.join_waitlist(user_id, date)
+
+    # FIXED: добавлен метод для вывода ближайших свободных слотов без открытия календаря и поддержка waitlist.
     async def get_all_working_dates(self) -> list[str]:
-        """Async-обёртка: возвращает все рабочие даты."""
+        """Async-обёртка: возвращает все рабочие даты в горизонте настроек (days_ahead)."""
         days = self._schedule_repo.get_all_days_in_range(
             _date.today().isoformat(),
-            (_date.today() + timedelta(days=90)).isoformat(),
+            (_date.today() + timedelta(days=self._days_ahead)).isoformat(),
         )
         return [d.date for d in days]
 

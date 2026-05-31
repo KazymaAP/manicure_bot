@@ -21,37 +21,34 @@ logger = logging.getLogger(__name__)
 class DatabaseManager:
     """Менеджер соединений с SQLite базой данных.
 
-    Реализует паттерн Singleton для единственного экземпляра.
-    Поддерживает WAL-режим и foreign keys для надёжности.
-    Использует thread-local storage для переиспользования соединений per-thread.
+    FIXED: Сделана потокобезопасная Singleton-инициализация с lock,
+    убрано закрытие соединения внутри transaction/read_connection (перепользование per-thread),
+    close() теперь закрывает соединение текущего потока.
     """
 
     _instance: DatabaseManager | None = None
     _initialized: bool = False
     _thread_local = threading.local()
+    _lock = threading.RLock()  # FIXED: блокировка для потокобезопасного создания/сброса
 
     def __new__(cls, db_path: str) -> DatabaseManager:
-        """Возвращает единственный экземпляр (Singleton)."""
-        if cls._instance is None:
-            instance = super().__new__(cls)
-            instance._initialized = False
-            cls._instance = instance
-        return cls._instance
+        """Потокобезопасный Singleton: возвращает единственный экземпляр."""
+        with cls._lock:  # FIXED: синхронизация создания
+            if cls._instance is None:
+                instance = super().__new__(cls)
+                instance._initialized = False
+                cls._instance = instance
+            return cls._instance
 
     def __init__(self, db_path: str) -> None:
-        """Инициализирует менеджер с указанным путём к файлу БД.
+        """Инициализирует менеджер с путём к файлу БД.
 
-        Args:
-            db_path: Путь к файлу SQLite базы данных.
-
-        Raises:
-            RuntimeError: Если Singleton уже инициализирован с другим путём.
+        Повторные инициализации с тем же путём безопасны; с другим путём — ошибка.
         """
         if self._initialized:
             if self._db_path != db_path:
                 raise RuntimeError(
-                    f"DatabaseManager already initialized with path {self._db_path!r}, "
-                    f"cannot reinitialize with {db_path!r}"
+                    f"DatabaseManager already initialized with path {self._db_path!r}, cannot reinitialize with {db_path!r}"
                 )
             return
         self._db_path = db_path
@@ -61,47 +58,44 @@ class DatabaseManager:
 
     @classmethod
     def reset(cls) -> None:
-        """Сбрасывает Singleton для тестов."""
-        cls._instance = None
-        cls._initialized = False
-        # Закрываем все thread-local соединения
-        if hasattr(cls._thread_local, 'conn') and cls._thread_local.conn:
+        """Сбрасывает Singleton для тестов и закрывает текущее thread-local соединение.
+
+        FIXED: потокобезопасный reset с блокировкой и правильным закрытием соединения текущего потока.
+        """
+        with cls._lock:
+            # Закрываем текущный поток-локал соединение безопасно
             try:
-                cls._thread_local.conn.close()
-            except Exception:
-                pass
-            cls._thread_local.conn = None
+                if hasattr(cls._thread_local, 'conn') and cls._thread_local.conn:
+                    try:
+                        cls._thread_local.conn.close()
+                    except Exception:
+                        pass
+                    cls._thread_local.conn = None
+            finally:
+                cls._instance = None
+                cls._initialized = False
 
     def _ensure_directory(self) -> None:
-        """Создаёт директорию для файла БД, если она не существует.
-
-        Raises:
-            RuntimeError: Если директория не существует или нет прав на запись.
-        """
+        """Создаёт директорию для файла БД, если она не существует."""
         directory = os.path.dirname(self._db_path)
         if not directory:
             return
         try:
             os.makedirs(directory, exist_ok=True)
-            # Проверяем, что директория доступна для записи
             test_file = os.path.join(directory, ".write_test")
             with open(test_file, "w") as f:
                 f.write("")
             os.remove(test_file)
         except (OSError, IOError) as e:
             raise RuntimeError(
-                f"Cannot create or write to database directory {directory!r}: {e}. "
-                f"Check directory permissions and volume mounts (Docker)."
+                f"Cannot create or write to database directory {directory!r}: {e}. Check directory permissions and volume mounts (Docker)."
             ) from e
 
     def get_connection(self) -> sqlite3.Connection:
         """Создаёт или переиспользует соединение для текущего потока (per-thread reuse).
 
-        WAL-режим устанавливается один раз в initialize_schema().
-        Это оптимизирует производительность при параллельных запросах,
-        избегая overhead на connect/close для каждого запроса.
+        FIXED: не закрываем соединение автоматически — управление жизненным циклом перенесено в close()/reset().
         """
-        # Переиспользуем соединение для текущего потока
         if not hasattr(self._thread_local, 'conn') or self._thread_local.conn is None:
             conn = sqlite3.connect(self._db_path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
@@ -114,33 +108,30 @@ class DatabaseManager:
 
     @contextmanager
     def transaction(self) -> Generator[sqlite3.Connection, None, None]:
-        """Контекстный менеджер для транзакций с автоматическим rollback.
+        """Контекстный менеджер для транзакций.
 
-        Yields:
-            Открытое соединение с БД в рамках транзакции.
-
-        Raises:
-            Exception: Перебрасывает любое исключение после rollback.
+        FIXED: BEGIN IMMEDIATE используется для предотвращения race condition при бронировании;
+        соединение НЕ закрывается в конце — переиспользуется per-thread.
         """
         conn = self.get_connection()
         try:
+            # Начинаем явную транзакцию с блокировкой записи (atomicity across operations)
+            conn.execute("BEGIN IMMEDIATE")  # FIXED: избежать гонки при конкурентном бронировании
             yield conn
             conn.commit()
         except Exception as exc:
             logger.error("Transaction rolled back due to error: %s", exc, exc_info=True)
-            conn.rollback()
+            try:
+                conn.rollback()
+            except Exception:
+                logger.exception("Rollback failed")
             raise
-        finally:
-            conn.close()
 
     @contextmanager
     def read_connection(self) -> Generator[sqlite3.Connection, None, None]:
-        """Контекстный менеджер для READ-ONLY операций (без commit).
+        """Контекстный менеджер для READ-ONLY операций (без commit/close).
 
-        Более эффективен для SELECT-запросов т.к. не создаёт транзакцию записи.
-
-        Yields:
-            Открытое соединение с БД.
+        FIXED: не закрываем соединение — это важно при переиспользовании per-thread.
         """
         conn = self.get_connection()
         try:
@@ -148,8 +139,6 @@ class DatabaseManager:
         except Exception as exc:
             logger.error("Read operation failed: %s", exc, exc_info=True)
             raise
-        finally:
-            conn.close()
 
     def initialize_schema(self) -> None:
         """Создаёт таблицы и индексы схемы БД, если они не существуют."""
@@ -182,7 +171,8 @@ class DatabaseManager:
                 created_at      TEXT    NOT NULL,
                 reminder_sent   INTEGER NOT NULL DEFAULT 0,
                 is_cancelled    INTEGER NOT NULL DEFAULT 0,
-                comment         TEXT
+                comment         TEXT,
+                service         TEXT DEFAULT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_appointments_user_id
@@ -199,11 +189,59 @@ class DatabaseManager:
                 ON time_slots(date, is_booked);
             CREATE INDEX IF NOT EXISTS idx_working_days_date
                 ON working_days(date);
+
+            CREATE TABLE IF NOT EXISTS waitlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            -- FIXED: Добавлены таблицы для админ-функций: blacklist и шаблоны рабочих дней
+            CREATE TABLE IF NOT EXISTS blacklist (
+                user_id INTEGER PRIMARY KEY,
+                reason TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS workday_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                slots TEXT NOT NULL -- JSON-encoded список ['09:00','10:00']
+            );
+
+            -- FIXED: таблица бэкапов для учета резервных копий (метаданные)
+            CREATE TABLE IF NOT EXISTS backups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
         """
         with self.transaction() as conn:
             conn.executescript(schema)
+            # FIXED: обратная совместимость — добавляем колонку service если её нет в существующей БД
+            try:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info('appointments')").fetchall()]
+                if 'service' not in cols:
+                    conn.execute("ALTER TABLE appointments ADD COLUMN service TEXT DEFAULT NULL")
+                    logger.info("Added missing column 'service' to appointments table for backward compatibility.")
+            except Exception:
+                logger.exception("Failed to ensure 'service' column exists; continuing.")
         logger.info("Database schema initialized successfully.")
 
     async def close(self) -> None:
-        """Закрывает все оставшиеся соединения с БД."""
+        """Закрывает соединение текущего потока с БД.
+
+        FIXED: ранее метод ничего не делал — теперь корректно закрывает thread-local соединение.
+        """
         logger.debug("DatabaseManager close called.")
+        try:
+            if hasattr(self._thread_local, 'conn') and self._thread_local.conn:
+                try:
+                    self._thread_local.conn.close()
+                except Exception:
+                    logger.exception("Error closing DB connection")
+                finally:
+                    self._thread_local.conn = None
+        except Exception:
+            logger.exception("Unexpected error during DatabaseManager.close()")

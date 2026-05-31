@@ -1,7 +1,8 @@
 aiogram==3.13.1
 pydantic==2.9.2
 pydantic-settings==2.6.1
-apscheduler==3.10.4
+apscheduler[sqlalchemy]==3.10.4
 python-dotenv==1.0.1
-pytest==8.3.3
-pytest-asyncio==0.24.0
+SQLAlchemy==2.0.20
+# DEV: pytest and pytest-asyncio removed from production requirements (move to dev-requirements.txt)
+# FIXED: добавить SQLAlchemy и использовать apscheduler[sqlalchemy] для персистентного jobstore

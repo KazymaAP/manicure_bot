@@ -53,7 +53,8 @@ class NotificationService:
         Args:
             appointment_id: ID созданной записи.
         """
-        appt = self._appointment_repo.get_by_id(appointment_id)
+        import asyncio
+        appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         if not appt:
             logger.warning("Cannot notify admin: appointment #%s not found", appointment_id)
             return
@@ -76,7 +77,8 @@ class NotificationService:
         Args:
             appointment_id: ID созданной записи.
         """
-        appt = self._appointment_repo.get_by_id(appointment_id)
+        import asyncio
+        appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         if not appt:
             return
 
@@ -93,7 +95,8 @@ class NotificationService:
         Args:
             appointment_id: ID отменённой записи.
         """
-        appt = self._appointment_repo.get_by_id(appointment_id)
+        import asyncio
+        appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         if not appt:
             return
 
@@ -133,7 +136,7 @@ class NotificationService:
         await self._safe_send(user_id, text)
 
     async def send_reminder(self, user_id: int, time: str, appointment_id: int) -> bool:
-        """Отправляет напоминание о предстоящем визите.
+        """Отправляет напоминание о предстоящем визите с кнопками подтверждения/отмены.
 
         Args:
             user_id: Telegram ID клиента.
@@ -143,29 +146,68 @@ class NotificationService:
         Returns:
             True если напоминание успешно отправлено.
         """
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
         text = MessageFormatter.send_reminder(time=time, service_name=self._service_name)
-        success = await self._safe_send(user_id, text)
-        if success:
-            self._appointment_repo.mark_reminder_sent(appointment_id)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Приду", callback_data=f"reminder_yes:{appointment_id}"), InlineKeyboardButton(text="❌ Отменить", callback_data=f"reminder_no:{appointment_id}")]
+        ])
+        try:
+            await self._bot.send_message(user_id, text, parse_mode="HTML", reply_markup=kb)
+            import asyncio
+            await asyncio.to_thread(self._appointment_repo.mark_reminder_sent, appointment_id)
             logger.info(
                 "Reminder sent to user %s for appointment #%s",
                 user_id, appointment_id,
             )
-        return success
+            return True
+        except Exception as exc:
+            logger.error("Failed to send reminder to %s: %s", user_id, exc)
+            return False
 
-    async def _safe_send(self, chat_id: int, text: str) -> bool:
-        """Безопасно отправляет сообщение с обработкой ошибок.
+    async def notify_waitlist_slot_available(self, user_id: int, date: str, time: str) -> bool:
+        """Уведомляет пользователя из waitlist о доступном слоте.
+
+        FIXED: отправляет клиенту уведомление с кнопкой для быстрого бронирования.
+
+        Args:
+            user_id: Telegram ID пользователя из waitlist.
+            date: Дата доступного слота.
+            time: Время доступного слота.
+
+        Returns:
+            True если уведомление отправлено.
+        """
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        text = (
+            "🔔 <b>Свободное место!</b>\n\n"
+            f"📅 <b>{date}</b> в <b>{time}</b>\n"
+            "Хотите это время? Нажмите кнопку ниже!"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Забронировать", callback_data=f"waitlist_book:{date}:{time}")]
+        ])
+        return await self._safe_send_with_markup(user_id, text, kb)
+
+    async def _safe_send_with_markup(
+        self,
+        chat_id: int,
+        text: str,
+        markup: object | None = None,
+    ) -> bool:
+        """Безопасно отправляет сообщение с клавиатурой.
 
         Args:
             chat_id: ID чата.
             text: Текст сообщения (HTML).
+            markup: Клавиатура (InlineKeyboardMarkup).
 
         Returns:
-            True если сообщение отправлено успешно.
+            True если сообщение отправлено.
         """
         try:
-            await self._bot.send_message(chat_id, text, parse_mode="HTML")
+            await self._bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
             return True
         except Exception as exc:
-            logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
+            logger.error("Failed to send message with markup to chat_id=%s: %s", chat_id, exc)
             return False

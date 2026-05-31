@@ -77,7 +77,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             "active": "активные",
             "all": "все",
         }
-        appointments = appt_service.get_appointments_filtered(filter_key)
+        import asyncio
+        appointments = await asyncio.to_thread(appt_service.get_appointments_filtered, filter_key)
         if not appointments:
             await callback.message.edit_text(MessageFormatter.admin_appointments_empty())
         else:
@@ -114,10 +115,14 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.invalid_appointment_id())
             return
 
-        appt = appt_service.get_appointment_by_id(appt_id)
+        import asyncio
+        appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
         if not appt:
             await message.answer(MessageFormatter.appointment_not_found())
-            await state.clear()
+            try:
+                await state.clear()
+            except Exception:
+                logger.exception("Failed to clear state in admin_cancel_by_id")
             return
 
         await state.update_data(cancel_appointment_id=appt_id)
@@ -134,9 +139,11 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer("Нет прав администратора.", show_alert=True)
             return
         appt_id = int(callback.data.split(":")[1])
-        appt = appt_service.get_appointment_by_id(appt_id)
+        import asyncio
+        appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
         try:
-            appt_service.admin_cancel_appointment(appt_id)
+            # FIXED: выполняем синхронную отмену в фоне
+            await asyncio.to_thread(appt_service.admin_cancel_appointment, appt_id)
             await callback.message.edit_text(
                 MessageFormatter.admin_cancel_success(appt_id, appt.client_name if appt else "?"),
                 reply_markup=None,
@@ -158,7 +165,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             logger.error("Ошибка отмены записи #%s: %s", appt_id, exc)
             await callback.message.edit_text(MessageFormatter.error_general())
         finally:
-            await state.clear()
+            try:
+                await state.clear()
+            except Exception:
+                logger.exception("Failed to clear FSM state in admin_confirm_cancel")
             await callback.answer()
 
     @router.callback_query(F.data.startswith("admin_cancel_abort:"))
@@ -366,7 +376,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not _is_admin(message.from_user.id):
             return
         try:
-            stats = appt_service.get_statistics()
+            import asyncio
+            stats = await asyncio.to_thread(appt_service.get_statistics)
             await message.answer(
                 MessageFormatter.admin_stats(
                     total=stats.get("total", 0),
@@ -380,6 +391,246 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         except Exception as exc:
             logger.error("Ошибка получения статистики: %s", exc)
             await message.answer(MessageFormatter.error_general())
+
+    # ── Админ: рассылка ───────────────────────────────────────────────────
+    @router.message(F.text == "📢 Рассылка")
+    async def admin_broadcast_start(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message.from_user.id):
+            return
+        await state.set_state(AdminFSM.waiting_for_broadcast)
+        await message.answer("Отправьте текст рассылки (можно HTML):", reply_markup=AdminKeyboard.cancel(), parse_mode="HTML")
+
+    @router.message(AdminFSM.waiting_for_broadcast, F.text)
+    async def admin_broadcast_preview(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        await state.update_data(broadcast_text=message.text)
+        await message.answer("Предпросмотр рассылки:", parse_mode="HTML")
+        await message.answer(message.text, parse_mode="HTML", reply_markup=AdminKeyboard.broadcast_confirm(message.text))
+
+    @router.callback_query(F.data == "admin_broadcast_send")
+    async def admin_broadcast_send(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        data = await state.get_data()
+        text = data.get("broadcast_text")
+        if not text:
+            await callback.answer("Нет текста для рассылки.")
+            return
+        await callback.answer("Рассылка запущена...")
+        import asyncio
+        try:
+            appts = await asyncio.to_thread(appt_service.get_all)
+            user_ids = {a.user_id for a in appts}
+            sent = 0
+            for uid in user_ids:
+                try:
+                    await callback.message.bot.send_message(uid, text, parse_mode="HTML")
+                    sent += 1
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    logger.exception("Failed to send broadcast to %s", uid)
+            await callback.message.edit_text(f"Рассылка завершена. Отправлено сообщений: {sent}")
+        except Exception as exc:
+            logger.exception("Broadcast failed: %s", exc)
+            await callback.message.edit_text(MessageFormatter.error_general())
+        finally:
+            try:
+                await state.clear()
+            except Exception:
+                pass
+
+    @router.callback_query(F.data == "admin_broadcast_cancel")
+    async def admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        await callback.message.edit_text(MessageFormatter.operation_cancelled())
+        await callback.answer()
+
+    # ── Админ: экспорт CSV ────────────────────────────────────────────────
+    @router.message(F.text == "⬇️ Экспорт CSV")
+    async def admin_export_csv_start(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message.from_user.id):
+            return
+        await state.set_state(AdminFSM.waiting_for_export_range)
+        await message.answer("Введите диапазон дат для экспорта в формате YYYY-MM-DD:YYYY-MM-DD", reply_markup=AdminKeyboard.cancel())
+
+    @router.message(AdminFSM.waiting_for_export_range, F.text)
+    async def admin_export_csv_receive(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        import re, io, csv, asyncio
+        m = re.match(r"^(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$", text)
+        if not m:
+            await message.answer("Неверный формат. Пример: 2023-01-01:2023-01-31")
+            return
+        from_date, to_date = m.group(1), m.group(2)
+        # Получим записи в фоне
+        appts = await asyncio.to_thread(appt_service.get_by_date_range, from_date, to_date)
+        if not appts:
+            await message.answer("Записей за указанный период не найдено.")
+            await state.clear()
+            return
+        # Генерируем CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "user_id", "username", "client_name", "phone", "date", "time", "service", "created_at", "is_cancelled"])
+        for a in appts:
+            writer.writerow([a.id, a.user_id, a.username, a.client_name, a.phone, a.date, a.time, a.service, a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "", int(a.is_cancelled)])
+        data = output.getvalue().encode("utf-8")
+        import io as _io
+        bio = _io.BytesIO(data)
+        bio.name = f"appointments_{from_date}_to_{to_date}.csv"
+        await message.answer_document(bio)
+        await state.clear()
+
+    # ── Админ: открыть неделю вперёд ─────────────────────────────────────
+    @router.message(F.text == "📅 Открыть неделю")
+    async def admin_open_week(message: Message) -> None:
+        if not _is_admin(message.from_user.id):
+            return
+        # Создаём 7 дней вперёд с default slots, учитывая рабочие дни в настройках
+        import asyncio
+        from datetime import date as _date, timedelta
+        today = _date.today()
+        created = 0
+        for i in range(7):
+            d = today + timedelta(days=i)
+            # Проверяем рабочие дни из настроек
+            if d.isoweekday() not in settings.work_days:
+                continue
+            try:
+                await asyncio.to_thread(sched_service.ensure_working_day_exists, d.isoformat())
+                created += 1
+            except Exception:
+                logger.exception("Failed to create working day %s", d.isoformat())
+        await message.answer(f"Открыто рабочих дней: {created}")
+
+    # ── Админ: поиск клиента по имени/телефону ─────────────────────────────
+    @router.message(F.text == "🔍 Найти клиента")
+    async def admin_find_client_start(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message.from_user.id):
+            return
+        await state.set_state(AdminFSM.waiting_for_search_query)
+        await message.answer("Введите имя или телефон клиента для поиска:", reply_markup=AdminKeyboard.cancel())
+
+    @router.message(AdminFSM.waiting_for_search_query, F.text)
+    async def admin_find_client_query(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        q = message.text.strip()
+        import asyncio
+        results = await asyncio.to_thread(appt_service.search_appointments_by_client, q)
+        if not results:
+            await message.answer("Клиент не найден.")
+            await state.clear()
+            return
+        await message.answer(MessageFormatter.admin_appointments_list(results, filter_name=f"по запросу {q}"), parse_mode="HTML")
+        await state.clear()
+
+    # ── Админ: черный список ─────────────────────────────────────────────
+    @router.message(F.text == "🛑 Черный список")
+    async def admin_blacklist_menu(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message.from_user.id):
+            return
+        await message.answer("Меню черного списка:", reply_markup=AdminKeyboard.blacklist_menu())
+
+    @router.callback_query(F.data == "admin_block_user")
+    async def admin_block_user_start(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.set_state(AdminFSM.waiting_for_blacklist_id)
+        await callback.message.answer("Введите Telegram ID пользователя для блокировки:", reply_markup=AdminKeyboard.cancel())
+        await callback.answer()
+
+    @router.message(AdminFSM.waiting_for_blacklist_id, F.text)
+    async def admin_block_user_receive(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        try:
+            user_id = int(message.text.strip())
+        except ValueError:
+            await message.answer("Неверный ID. Введите цифры.")
+            return
+        await state.update_data(block_user_id=user_id)
+        await state.set_state(AdminFSM.waiting_for_block_reason)
+        await message.answer("Введите причину блокировки (коротко):", reply_markup=AdminKeyboard.cancel())
+
+    @router.message(AdminFSM.waiting_for_block_reason, F.text)
+    async def admin_block_user_confirm(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_id = data.get("block_user_id")
+        reason = message.text.strip()
+        from datetime import datetime
+        try:
+            import asyncio
+            # Вставляем запись в таблицу blacklist
+            def _do_block():
+                with appt_service._appointment_repo._db.transaction() as conn:
+                    conn.execute("INSERT OR REPLACE INTO blacklist (user_id, reason, created_at) VALUES (?, ?, ?)", (user_id, reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            await asyncio.to_thread(_do_block)
+            await message.answer(f"Пользователь {user_id} добавлен в черный список.")
+        except Exception:
+            logger.exception("Failed to block user %s", user_id)
+            await message.answer(MessageFormatter.error_general())
+        finally:
+            await state.clear()
+
+    @router.callback_query(F.data == "admin_unblock_user")
+    async def admin_unblock_user(callback: CallbackQuery) -> None:
+        await callback.answer()
+        await callback.message.answer("Введите Telegram ID для разблокировки:")
+
+    # ── Админ: отмена всех записей на день (экстренная) ──────────────────
+    @router.message(F.text == "🚫 Отменить все записи на дату")
+    async def admin_cancel_all_start(message: Message, state: FSMContext) -> None:
+        if not _is_admin(message.from_user.id):
+            return
+        await state.set_state(AdminFSM.confirming_cancel_all)
+        await message.answer("Введите дату YYYY-MM-DD для массовой отмены:", reply_markup=AdminKeyboard.cancel())
+
+    @router.message(AdminFSM.confirming_cancel_all, F.text)
+    async def admin_cancel_all_execute(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        date_str = message.text.strip()
+        import asyncio
+        try:
+            # Отменяем все записи на дату и уведомляем клиентов
+            appts = await asyncio.to_thread(appt_service.get_by_date, date_str)
+            count = 0
+            for a in appts:
+                try:
+                    await asyncio.to_thread(appt_service.admin_cancel_appointment, a.id)
+                    await notif_service.notify_client_cancellation_by_admin(a.user_id, a.date, a.time)
+                    count += 1
+                except Exception:
+                    logger.exception("Failed to cancel appointment %s", a.id)
+            await message.answer(f"Отменено записей: {count}")
+        except Exception:
+            logger.exception("Failed to cancel all appointments on %s", date_str)
+            await message.answer(MessageFormatter.error_general())
+        finally:
+            await state.clear()
+
+    # ── Навигация назад ───────────────────────────────────────────────────
+    @router.callback_query(F.data == "admin_back_main")
+    async def admin_back_main(callback: CallbackQuery) -> None:
+        await callback.message.edit_text(
+            MessageFormatter.admin_welcome(),
+            reply_markup=None,
+            parse_mode="HTML",
+        )
+        await callback.answer()
 
     # ── Навигация назад ───────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_back_main")

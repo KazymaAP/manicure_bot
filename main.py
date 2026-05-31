@@ -52,26 +52,73 @@ async def main() -> None:
     logger.info("Контейнер зависимостей инициализирован")
 
     # ── Middleware ────────────────────────────────────────────────────────
-    dp.message.middleware(LoggingMiddleware())
-    dp.callback_query.middleware(LoggingMiddleware())
+    logging_mw = LoggingMiddleware()
+    dp.message.middleware(logging_mw)
+    dp.callback_query.middleware(logging_mw)
+    # FIXED: простая защита от флуда — rate limiting middleware per-user
+    from src.presentation.middlewares.rate_limit_middleware import RateLimitMiddleware
+
+    rate_mw = RateLimitMiddleware()
+    dp.message.middleware(rate_mw)
+    dp.callback_query.middleware(rate_mw)
 
     # ── Роутеры ───────────────────────────────────────────────────────────
     dp.include_router(setup_common_router(container))
     dp.include_router(setup_user_router(container))
     dp.include_router(setup_admin_router(container))
+    # FIXED: подключаем роутеры расширенных и финальных фич
+    from src.presentation.handlers.extended_features_handler import setup_extended_features_router
+    from src.presentation.handlers.final_features_handler import setup_final_features_router
+    dp.include_router(setup_extended_features_router(container))
+    dp.include_router(setup_final_features_router(container))
 
     # ── Планировщик напоминаний ───────────────────────────────────────────
     reminder_service = container.reminder_service
     reminder_service.start()
     reminder_service.restore_reminders()
+    # FIXED: планируем ежедневный дайджест и бэкап
+    reminder_service.schedule_daily_digest(hour=9, minute=0)  # 9:00 UTC
+    reminder_service.schedule_daily_backup(hour=2, minute=0)  # 2:00 UTC
     logger.info("Планировщик напоминаний запущен")
 
-    # ── Запуск polling ────────────────────────────────────────────────────
+    # ── Health Server (для мониторинга) ────────────────────────────────────
+    health_server = None
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Бот запущен. Ожидаю обновления…")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        from src.infrastructure.http.health_server import HealthServer
+
+        health_server = HealthServer(
+            appointment_service=container.appointment_service,
+            port=int(__import__("os").getenv("HEALTH_PORT", "8080")),
+        )
+        await health_server.setup()
+    except ImportError:
+        logger.warning("aiohttp not available, health server disabled")
+    except Exception as exc:
+        logger.warning("Failed to start health server: %s", exc)
+
+    # ── Запуск polling или webhook ────────────────────────────
+    try:
+        # FIXED: фича #40 — поддержка webhook режима если настроен
+        if settings.webhook_url:
+            logger.info("Запуск бота в режиме webhook: %s", settings.webhook_url)
+            await bot.set_webhook(settings.webhook_url)
+            # Вместо polling используем webhook сервер (нужен отдельный код для aiohttp)
+            logger.warning("Webhook requires custom server implementation (currently not fully integrated)")
+            # Fallback на polling
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Fallback to polling mode")
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        else:
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Бот запущен. Ожидаю обновления…")
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        # Грамотно останавливаем health server
+        if health_server:
+            try:
+                await health_server.shutdown()
+            except Exception:
+                pass
         # Грамотно останавливаем сервис напоминаний и ресурсы контейнера
         try:
             reminder_service.shutdown()

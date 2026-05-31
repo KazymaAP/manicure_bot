@@ -38,7 +38,8 @@ ENV PYTHONUNBUFFERED=1
 COPY . .
 
 # Директория для базы данных
-RUN mkdir -p /app/data && chmod 777 /app/data
+RUN mkdir -p /app/data && chmod 755 /app/data
+# FIXED: убрать chmod 777 — сделать права 755 для безопасности (не даём права на запись всем)
 
 # Запуск бота
 CMD ["python", "main.py"]

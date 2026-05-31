@@ -61,6 +61,18 @@ class Settings(BaseSettings):
         description="Временные слоты по умолчанию",
     )
 
+    # ─── Услуги (название -> {duration: minutes, price: int})
+    services: dict = Field(
+        default_factory=dict,
+        description="Словарь услуг с длительностью и ценой, например {'маникюр': {'duration': 60, 'price': 1200}}",
+    )
+
+    # ─── Рабочие дни (1=Пн ... 7=Вс) по умолчанию
+    work_days: list[int] = Field(
+        default=[1, 2, 3, 4, 5],
+        description="Дни недели, которые считаются рабочими при генерации шаблонов",
+    )
+
     # ─── Бизнес-логика ───────────────────────────────────────
     reminder_hours_before: int = Field(
         default=24,
@@ -92,6 +104,34 @@ class Settings(BaseSettings):
     log_file: str | None = Field(
         default="bot.log",
         description="Файл логов (None = только stdout)",
+    )
+
+    # ─── Контактная информация (фича #20) ─────────────────────
+    phone: str | None = Field(
+        default=None,
+        description="Номер телефона мастера",
+    )
+    instagram: str | None = Field(
+        default=None,
+        description="Ссылка на Instagram или @username",
+    )
+    address: str | None = Field(
+        default=None,
+        description="Адрес студии",
+    )
+    maps_link: str | None = Field(
+        default=None,
+        description="Ссылка на Google Maps или Яндекс.Карты",
+    )
+
+    # ─── Webhook (фича #40) ──────────────────────────────────
+    webhook_url: str | None = Field(
+        default=None,
+        description="URL для webhook (если используется вместо polling)",
+    )
+    webhook_port: int = Field(
+        default=8443,
+        description="Порт для webhook сервера",
     )
 
     # ─── Валидаторы ──────────────────────────────────────────

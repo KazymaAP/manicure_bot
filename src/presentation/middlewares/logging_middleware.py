@@ -28,7 +28,8 @@ class LoggingMiddleware(BaseMiddleware):
     ) -> Any:
         start_time = time.monotonic()
 
-        update: Update = data.get("event_update", event)
+        # event может быть различными объектами; используем TelegramObject для корректной типизации
+        update: TelegramObject = data.get("event_update", event)
         update_type = "unknown"
         user_id = None
 
