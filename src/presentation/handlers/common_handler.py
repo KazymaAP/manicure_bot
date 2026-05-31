@@ -173,22 +173,30 @@ def setup_common_router(container: Container) -> Router:
 
         # FIXED: пытаемся получить последнюю запись для персонального приветствия
         appt_service = container.appointment_service
-        greeting = "👋 Добро пожаловать!"
+        greeting_name = None
         try:
             last_appt = await asyncio.to_thread(appt_service.get_last_appointment, user_id)
             if last_appt and last_appt.client_name:
-                greeting = f"👋 Добро пожаловать снова, <b>{last_appt.client_name}</b>!"
+                greeting_name = last_appt.client_name
         except Exception:
             pass
 
-        await message.answer(
-            greeting + "\n\n" + MessageFormatter.welcome(message.from_user.username),
-            reply_markup=MainMenuKeyboard.main(
-                is_admin=is_admin,
-                portfolio_url=portfolio,
-            ),
-            parse_mode="HTML",
-        )
+        # FIXED: используем баннерное приветствие с разделителями и кнопкой; отправляем фото если задано в settings
+        welcome_text = MessageFormatter.welcome_banner(greeting_name or message.from_user.first_name or message.from_user.username)
+        if getattr(settings, 'welcome_photo_url', None):
+            # FIXED: отправка фото с подписью-баннером
+            await message.answer_photo(
+                photo=settings.welcome_photo_url,
+                caption=welcome_text,
+                reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(
+                welcome_text,
+                reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
+                parse_mode="HTML",
+            )
 
     @router.callback_query(F.data == "check_subscription")
     async def check_subscription_cb(callback: CallbackQuery) -> None:

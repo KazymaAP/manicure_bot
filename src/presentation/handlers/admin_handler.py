@@ -37,8 +37,25 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not _is_admin(message.from_user.id):
             await message.answer(MessageFormatter.admin_not_authorized())
             return
+        import asyncio
+        # Получаем статистику и количество свободных слотов
+        stats = await asyncio.to_thread(appt_service.get_statistics)
+        free_slots = 0
+        try:
+            if hasattr(sched_service, 'count_free_slots'):
+                free_slots = await asyncio.to_thread(sched_service.count_free_slots)
+        except Exception:
+            free_slots = 0
+        # FIXED: отправляем сводку дня в заголовке панели администратора
+        text = MessageFormatter.admin_dashboard_summary(
+            today=stats.get('today', 0),
+            free_slots=free_slots,
+            week=stats.get('week', 0),
+            total=stats.get('total', 0),
+            confirmed=stats.get('confirmed', 0),
+        )
         await message.answer(
-            MessageFormatter.admin_welcome(),
+            text,
             reply_markup=AdminKeyboard.main_menu(),
             parse_mode="HTML",
         )

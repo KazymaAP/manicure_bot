@@ -605,3 +605,147 @@ class MessageFormatter:
             f"{content}"
         )
 
+    @staticmethod
+    def welcome_banner(name: str | None) -> str:
+        """Красивое баннерное приветствие с эмодзи и блоком "Что я умею".
+
+        FIXED: оформлено как баннер для /start (фича: персональное приветствие и UX).
+        """
+        display_name = name or "друг"
+        separator = "━" * 30
+        what_i_can = (
+            "💅 Запись на услуги\n"
+            "📆 Просмотр расписания\n"
+            "🔔 Напоминания\n"
+            "📞 Контакты и прайс\n"
+        )
+        return (
+            f"💅 <b>Привет, {display_name}!</b> {separator} \n"
+            "<i>Я бот для записи к мастеру маникюра. Быстро, просто, без звонков!</i>\n"
+            f"{separator}\n"
+            f"🌸 <b>Что я умею:</b>\n{what_i_can}\n"
+            "🌸 Выберите действие ниже:"
+        )
+
+    # FIXED: карточка записи в рамке из Unicode-символов
+    @staticmethod
+    def appointment_card_box(date_str: str, time_str: str, client_name: str, phone: str, comment: str | None = None, service: str | None = None) -> str:
+        """Создаёт текстовую карточку записи с рамкой и иконками.
+
+        Использует символы ╔╗╚╝║═ для оформления.
+        """
+        try:
+            from datetime import datetime
+            d = datetime.strptime(date_str, "%Y-%m-%d")
+            formatted_date = f"{d.day} {MONTHS_RU_GEN[d.month]} {d.year}"
+        except Exception:
+            formatted_date = date_str
+        header = "╔" + "═" * 37 + "╗\n"
+        footer = "\n╚" + "═" * 37 + "╝"
+        service_line = f"\n💼 Услуга: <b>{service}</b>" if service else ""
+        comment_line = f"\n💬 {comment}" if comment else ""
+        body = (
+            f"║ 📅 <b>{formatted_date}</b>\n"
+            f"║ 🕐 <b>{time_str}</b>\n"
+            f"║ 👤 <b>{client_name}</b>\n"
+            f"║ 📱 <code>{phone}</code>"
+            f"{service_line}"
+            f"{comment_line}"
+        )
+        prompt = "\n\nВсё верно? Нажмите ✅ Подтвердить"
+        return header + body + footer + prompt
+
+    # FIXED: списки записей — каждая запись отдельный блок с кнопкой отмены (текстовая часть)
+    @staticmethod
+    def my_appointments_list_blocks(appointments: list[Appointment]) -> str:
+        lines = [MessageFormatter._tpl("my.header", "📋 <b>Ваши записи:</b>\n")]
+        for i, appt in enumerate(appointments, start=1):
+            try:
+                from datetime import datetime
+                d = datetime.strptime(appt.date, "%Y-%m-%d")
+                formatted_date = f"{d.day} {MONTHS_RU_GEN[d.month]} {d.year}"
+            except Exception:
+                formatted_date = appt.date
+            status = "✅ Активна" if appt.is_active else "❌ Отменена"
+            header = f"╔══ Запись #{appt.id or i} ══╗\n"
+            body = (
+                f"📅 <b>{formatted_date}</b> в <b>{appt.time}</b> — <b>{status}</b>\n"
+                f"👤 {appt.client_name} | 📱 <code>{appt.phone}</code>\n"
+            )
+            footer = "╚" + "═" * 35 + "╝\n"
+            lines.append(header + body + footer)
+        return "\n".join(lines)
+
+    # FIXED: Админ-дашборд — сводка дня в заголовке
+    @staticmethod
+    def admin_dashboard_summary(today: int, free_slots: int, week: int, total: int = 0, confirmed: int = 0) -> str:
+        separator = "━" * 30
+        return (
+            f"⚙️ <b>Панель администратора</b> {separator}\n"
+            f"📅 Сегодня: <b>{today}</b> записей  🟢 Свободных слотов: <b>{free_slots}</b>\n"
+            f"📊 За неделю: <b>{week}</b> записей  |  Всего: <b>{total}</b>\n"
+            f"{separator}\n"
+            "Выберите действие:"
+        )
+
+    # FIXED: Карточное напоминание с адресом и призывами
+    @staticmethod
+    def reminder_card(client_name: str, date: str, time: str, address: str = "") -> str:
+        separator = "━" * 30
+        text = (
+            f"⏰ <b>Напоминание о записи!</b> {separator}\n"
+            f"Привет, <b>{client_name}</b>!\n"
+            f"📅 <b>{date}</b>  🕐 <b>{time}</b>\n"
+        )
+        if address:
+            text += f"📍 <code>{address}</code>\n"
+        text += "\nНажмите кнопку ниже:"
+        return text
+
+    # FIXED: праздничное сообщение при успешной записи
+    @staticmethod
+    def booking_success_festive(date_str: str, time_str: str, service: str | None = None, hours_before: int = 24) -> str:
+        try:
+            from datetime import datetime
+            d = datetime.strptime(date_str, "%Y-%m-%d")
+            formatted_date = f"{d.day} {MONTHS_RU_GEN[d.month]} {d.year}"
+        except Exception:
+            formatted_date = date_str
+        service_line = f"\n💅 <b>{service}</b>" if service else ""
+        return (
+            "🎉 <b>Запись подтверждена!</b>\n\n"
+            f"Вы записаны на: 📅 <b>{formatted_date}</b>  🕐 <b>{time_str}</b>{service_line}\n\n"
+            f"⏰ Напоминание придёт за {hours_before} ч. До встречи! 🌸"
+        )
+
+    # FIXED: прогресс бары для статистики админа
+    @staticmethod
+    def admin_stats_with_bars(done: int, cancelled: int, total: int) -> str:
+        def bar(value: int, total_v: int, width: int = 10) -> str:
+            import math
+            filled = int(math.ceil(width * (value / total_v))) if total_v else 0
+            return "█" * filled + "░" * (width - filled)
+        done_pct = int((done / total) * 100) if total else 0
+        canceled_pct = int((cancelled / total) * 100) if total else 0
+        return (
+            f"📊 <b>Статистика</b>\n\n"
+            f"✅ Выполнено: <b>{done}</b> {bar(done, total)} {done_pct}%\n"
+            f"❌ Отменено: <b>{cancelled}</b> {bar(cancelled, total)} {canceled_pct}%\n"
+        )
+
+    # FIXED: формирование локализованной метки слота с длительностью и статусом
+    @staticmethod
+    def slot_button_label(time_str: str, duration_minutes: int, locked: bool = False) -> str:
+        if locked:
+            return f"🔒 {time_str} — занято"
+        return f"⚡ {time_str} ({duration_minutes} мин)"
+
+    # FIXED: улучшенная ошибка с кнопками действий
+    @staticmethod
+    def error_with_retry(reason: str | None = None) -> str:
+        text = "⚠️ <b>Что-то пошло не так</b>\n\n"
+        if reason:
+            text += f"{reason}\n\n"
+        text += "Попробуйте ещё раз или вернитесь в главное меню."
+        return text
+

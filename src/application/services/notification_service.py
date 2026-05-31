@@ -147,13 +147,18 @@ class NotificationService:
             True если напоминание успешно отправлено.
         """
         from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-        text = MessageFormatter.send_reminder(time=time, service_name=self._service_name)
+        import asyncio
+        # FIXED: используем карточное напоминание с деталями визита и кнопками
+        appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
+        client_name = appt.client_name if appt else ""
+        date = appt.date if appt else ""
+        address = getattr(self, "_address", "") or ""
+        text = MessageFormatter.reminder_card(client_name=client_name, date=date, time=time, address=address)
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Приду", callback_data=f"reminder_yes:{appointment_id}"), InlineKeyboardButton(text="❌ Отменить", callback_data=f"reminder_no:{appointment_id}")]
         ])
         try:
             await self._bot.send_message(user_id, text, parse_mode="HTML", reply_markup=kb)
-            import asyncio
             await asyncio.to_thread(self._appointment_repo.mark_reminder_sent, appointment_id)
             logger.info(
                 "Reminder sent to user %s for appointment #%s",

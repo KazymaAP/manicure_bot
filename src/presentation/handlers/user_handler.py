@@ -288,7 +288,8 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
 
     async def _show_confirmation(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
-        text = MessageFormatter.booking_confirmation(
+        # FIXED: показываем карточку записи с рамкой и призывом к действию
+        card = MessageFormatter.appointment_card_box(
             date_str=data["chosen_date"],
             time_str=data["chosen_time"],
             client_name=data["client_name"],
@@ -298,7 +299,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         )
         await state.set_state(BookingFSM.confirming)
         await message.answer(
-            text,
+            card,
             reply_markup=BookingKeyboard.confirm(),
             parse_mode="HTML",
         )
@@ -416,7 +417,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         if not appointments:
             await message.answer(MessageFormatter.my_appointments_empty())
             return
-        text = MessageFormatter.my_appointments_list(appointments)
+        text = MessageFormatter.my_appointments_list_blocks(appointments)
         await message.answer(
             text,
             reply_markup=BookingKeyboard.cancel_appointment_list(appointments),
