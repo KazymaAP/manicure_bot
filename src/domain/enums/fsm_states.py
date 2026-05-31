@@ -36,3 +36,5 @@ class AdminFSM(StatesGroup):
     waiting_for_search_query = State()
     confirming_cancel_all = State()
     confirming_cancel_all_date = State()
+    # FIXED: добавлено отсутствующее состояние для разблокировки пользователя
+    waiting_for_unblock_user_id = State()

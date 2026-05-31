@@ -134,6 +134,18 @@ class Settings(BaseSettings):
         description="Порт для webhook сервера",
     )
 
+    # ─── Временная зона (FIXED) ───────────────────────────────
+    timezone: str = Field(
+        default="UTC",
+        description="Временная зона для напоминаний (например 'Europe/Moscow'). По умолчанию UTC.",
+    )
+
+    # ─── Приветственное фото ─────────────────────────────────
+    welcome_photo_url: str | None = Field(
+        default=None,
+        description="URL фото для приветственного баннера (опционально)",
+    )
+
     # ─── Валидаторы ──────────────────────────────────────────
     @field_validator("bot_token")
     @classmethod

@@ -9,6 +9,7 @@ FIXED: все оставшиеся функции:
 - Inline режим для поиска дат (фича #36)
 """
 
+import asyncio  # FIXED: отсутствовал import asyncio на уровне модуля
 import logging
 from datetime import date as _date, datetime, timedelta
 import csv
@@ -63,7 +64,8 @@ def setup_final_features_router(container: Container) -> Router:
 
         from src.presentation.keyboards.booking import BookingKeyboard
 
-        kb = BookingKeyboard.my_appointments_actions(appts[0].id if appts else 0)
+        # FIXED BUG 3: метод my_appointments_actions не существует, используем cancel_appointment_list
+        kb = BookingKeyboard.cancel_appointment_list(appts)
         await message.answer(text, reply_markup=kb)
 
     # ── #5 /slots — ближайшие свободные слоты ──────────────────────────────
@@ -78,7 +80,9 @@ def setup_final_features_router(container: Container) -> Router:
 
             slots = []
             for date_str in available_dates[:5]:
-                times = await asyncio.to_thread(sched_service.get_available_times, date_str)
+                # FIXED BUG 2: используем get_available_slots вместо get_available_times
+                slot_objs = await sched_service.get_available_slots(date_str)
+                times = [s.time for s in slot_objs]
                 if times:
                     slots.append((date_str, times[0]))
 
@@ -110,10 +114,11 @@ def setup_final_features_router(container: Container) -> Router:
                 return
 
             # Получаем количество слотов на каждую дату
+            # FIXED BUG 2: используем get_available_slots вместо get_available_times
             free_slots = {}
             for date_str in available_dates[:10]:
-                times = await asyncio.to_thread(sched_service.get_available_times, date_str)
-                free_slots[date_str] = len(times) if times else 0
+                slot_objs = await sched_service.get_available_slots(date_str)
+                free_slots[date_str] = len(slot_objs)
 
             text = MessageFormatter.schedule_view_for_client(available_dates[:10], free_slots)
             await message.answer(text)

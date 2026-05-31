@@ -664,12 +664,24 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     # ── Навигация назад ───────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_back_main")
     async def admin_back_main(callback: CallbackQuery) -> None:
-       await callback.message.edit_text(
-           MessageFormatter.admin_welcome(),
-           reply_markup=None,
-           parse_mode="HTML",
-       )
-       await callback.answer()
+        await callback.message.edit_text(
+            MessageFormatter.admin_welcome(),
+            reply_markup=None,
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    # FIXED: добавлен обработчик "admin_main_menu" — использовался в extended_features_handler
+    # но нигде не был зарегистрирован
+    @router.callback_query(F.data == "admin_main_menu")
+    async def admin_main_menu_cb(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        await callback.message.edit_text(
+            MessageFormatter.admin_welcome(),
+            reply_markup=None,
+            parse_mode="HTML",
+        )
+        await callback.answer()
 
     @router.callback_query(F.data == "admin_back_schedule")
     async def admin_back_schedule(callback: CallbackQuery) -> None:

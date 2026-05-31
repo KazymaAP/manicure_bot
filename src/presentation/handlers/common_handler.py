@@ -5,6 +5,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
 from src.config.dependencies import Container
@@ -226,6 +227,21 @@ def setup_common_router(container: Container) -> Router:
         await message.answer(
             MessageFormatter.help_text(),
             parse_mode="HTML",
+        )
+
+    @router.message(Command("cancel"))
+    async def cmd_cancel(message: Message, state: FSMContext) -> None:
+        """FIXED: /cancel — сброс FSM состояния. Предотвращает 'зависание' пользователя."""
+        current_state = await state.get_state()
+        if current_state is None:
+            await message.answer("Нет активного действия для отмены.")
+            return
+        await state.clear()
+        is_admin = message.from_user.id in settings.admin_ids
+        portfolio = _get_portfolio(settings)
+        await message.answer(
+            "❌ Действие отменено. Возвращаемся в главное меню.",
+            reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
         )
 
     @router.message(F.text == "🏠 Главное меню")

@@ -261,6 +261,27 @@ class AppointmentRepository(BaseRepository):
             "last_completed_date": None,
         }
 
+    # FIXED BUG 7: методы работы с blacklist перенесены в репозиторий для правильной инкапсуляции
+    def block_user(self, user_id: int, reason: str) -> None:
+        """Добавляет пользователя в чёрный список."""
+        from datetime import datetime
+        with self._db.transaction() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO blacklist (user_id, reason, created_at) VALUES (?, ?, ?)",
+                (user_id, reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+
+    def unblock_user(self, user_id: int) -> None:
+        """Удаляет пользователя из чёрного списка."""
+        with self._db.transaction() as conn:
+            conn.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
+
+    def is_user_blocked(self, user_id: int) -> bool:
+        """Проверяет, заблокирован ли пользователь."""
+        with self._db.read_connection() as conn:
+            row = conn.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)).fetchone()
+            return row is not None
+
     def get_month_statistics(self, year: int, month: int) -> dict:
         """Возвращает статистику по месяцам для админ-панели.
 

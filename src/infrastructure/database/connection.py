@@ -163,9 +163,10 @@ class DatabaseManager:
 
     def initialize_schema(self) -> None:
         """Создаёт таблицы и индексы схемы БД, если они не существуют."""
-        # WAL-режим устанавливается один раз для всей БД
-        with self.transaction() as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        # FIXED: WAL-режим устанавливается ВНЕ транзакции — нельзя менять journal_mode внутри BEGIN
+        conn = self.get_connection()
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.commit()
         schema = """
             CREATE TABLE IF NOT EXISTS working_days (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,7 +216,8 @@ class DatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 date TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, date)
             );
 
             -- FIXED: Добавлены таблицы для админ-функций: blacklist и шаблоны рабочих дней
@@ -237,6 +239,17 @@ class DatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+
+            -- FIXED: таблица всех пользователей, взаимодействовавших с ботом
+            -- Используется для рассылки всем пользователям, а не только с активными записями
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         """
         with self.transaction() as conn:

@@ -107,7 +107,9 @@ def setup_extended_features_router(container: Container) -> Router:
         data = await state.get_data()
 
         # Получаем доступные времена на новую дату
-        available_times = await asyncio.to_thread(sched_service.get_available_times, date_str)
+        # FIXED BUG 2: метод get_available_times не существует, используем get_available_slots
+        slots = await sched_service.get_available_slots(date_str)
+        available_times = [s.time for s in slots]
         if not available_times:
             await callback.answer("❌ На эту дату нет доступных времён", show_alert=True)
             return
@@ -117,6 +119,7 @@ def setup_extended_features_router(container: Container) -> Router:
 
         from src.presentation.keyboards.booking import BookingKeyboard
 
+        # FIXED BUG 3: метод time_selection добавлен в BookingKeyboard
         kb = BookingKeyboard.time_selection(available_times)
         await callback.message.edit_text(
             f"🕐 Выберите <b>новое время</b> для {date_str}:", reply_markup=kb
@@ -190,9 +193,8 @@ def setup_extended_features_router(container: Container) -> Router:
         date_str = callback.data.split(":")[1]
         user_id = callback.from_user.id
 
-        success = await asyncio.to_thread(
-            lambda: sched_service.join_waitlist(user_id, date_str)
-        )
+        # FIXED: join_waitlist — async метод, вызываем напрямую без to_thread
+        success = await sched_service.join_waitlist(user_id, date_str)
 
         if success:
             await callback.answer(
@@ -213,7 +215,8 @@ def setup_extended_features_router(container: Container) -> Router:
     # ═══════════════════════════════════════════════════════════════════════
 
     # ── #14 История посещений клиента ──────────────────────────────────────
-    @router.callback_query(AdminFSM.main_menu, F.data == "admin_view_history")
+    # FIXED: убран фильтр AdminFSM.main_menu — хендлер никогда не срабатывал т.к. это состояние не активировалось
+    @router.callback_query(F.data == "admin_view_history")
     async def admin_view_client_history(callback: CallbackQuery, state: FSMContext) -> None:
         """Показывает историю посещений для введённого клиента.
 
@@ -275,7 +278,8 @@ def setup_extended_features_router(container: Container) -> Router:
         await state.clear()
 
     # ── #23 Статистика по месяцам в admin-панели ───────────────────────────
-    @router.callback_query(AdminFSM.main_menu, F.data == "admin_monthly_stats")
+    # FIXED: убран фильтр AdminFSM.main_menu — хендлер никогда не срабатывал
+    @router.callback_query(F.data == "admin_monthly_stats")
     async def admin_show_monthly_stats(callback: CallbackQuery, state: FSMContext) -> None:
         """Показывает статистику по текущему месяцу."""
         import asyncio
@@ -285,8 +289,8 @@ def setup_extended_features_router(container: Container) -> Router:
             appt_service.get_month_statistics, now.year, now.month
         )
 
-        # Преобразуем дни недели (0=пн, 6=вс) в названия
-        weekday_names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        # FIXED: strftime('%w') возвращает 0=Вс, 1=Пн .. 6=Сб (не 0=Пн!)
+        weekday_names = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]
         popular_weekdays_text = ", ".join(
             [
                 f"{weekday_names[int(d['weekday'])]} ({d['count']})"
@@ -314,7 +318,8 @@ def setup_extended_features_router(container: Container) -> Router:
         await callback.answer()
 
     # ── #12 Шаблоны расписания ────────────────────────────────────────────
-    @router.callback_query(AdminFSM.main_menu, F.data == "admin_templates")
+    # FIXED: убран фильтр AdminFSM.main_menu — хендлер никогда не срабатывал
+    @router.callback_query(F.data == "admin_templates")
     async def admin_manage_templates(callback: CallbackQuery, state: FSMContext) -> None:
         """Показывает меню управления шаблонами расписания.
 
@@ -336,13 +341,15 @@ def setup_extended_features_router(container: Container) -> Router:
             text += "ℹ️ Нет сохранённых шаблонов\n\n"
         else:
             for tmpl in templates:
-                text += f"• <b>{tmpl['name']}</b>: {tmpl['schedule']}\n"
+                # FIXED: колонка называется 'slots', не 'schedule'
+                text += f"• <b>{tmpl['name']}</b>: {tmpl.get('slots', tmpl.get('schedule', ''))}\n"
 
         kb = AdminKeyboard.templates_menu()
         await callback.message.edit_text(text, reply_markup=kb)
         await callback.answer()
 
-    @router.callback_query(AdminFSM.main_menu, F.data == "admin_save_template")
+    # FIXED: убран фильтр AdminFSM.main_menu
+    @router.callback_query(F.data == "admin_save_template")
     async def admin_save_template_start(callback: CallbackQuery, state: FSMContext) -> None:
         """Начинает сохранение шаблона расписания."""
         await state.set_state(AdminFSM.waiting_for_template_name)
@@ -385,7 +392,8 @@ def setup_extended_features_router(container: Container) -> Router:
         await state.clear()
 
     # ── #43 Кнопка «Отменить все записи» на дату ──────────────────────────
-    @router.callback_query(AdminFSM.main_menu, F.data == "admin_cancel_all_date")
+    # FIXED: убран фильтр AdminFSM.main_menu
+    @router.callback_query(F.data == "admin_cancel_all_date")
     async def admin_cancel_all_start(callback: CallbackQuery, state: FSMContext) -> None:
         """Начинает процесс массовой отмены записей на дату."""
         await state.set_state(AdminFSM.confirming_cancel_all_date)

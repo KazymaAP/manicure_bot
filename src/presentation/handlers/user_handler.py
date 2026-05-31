@@ -57,8 +57,9 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 pass
 
         # Предлагаем выбрать услугу перед датой
+        # FIXED: передаём settings.services для динамической генерации кнопок
         await state.set_state(BookingFSM.choosing_service)
-        await message.answer(MessageFormatter._tpl("booking.choose_service", "Выберите услугу:"), reply_markup=BookingKeyboard.service_selection())
+        await message.answer(MessageFormatter._tpl("booking.choose_service", "Выберите услугу:"), reply_markup=BookingKeyboard.service_selection(settings.services or None))
 
         # FIXED: добавляем кнопку "Использовать прошлые данные" если у пользователя есть прошлые записи
         import asyncio
@@ -101,7 +102,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         await callback.answer("Данные заполнены из последней записи.")
         # Предложим выбрать услугу (если не выбрана)
         if not (await state.get_data()).get("service"):
-            await callback.message.answer(MessageFormatter._tpl("booking.choose_service", "Выберите услугу:"), reply_markup=BookingKeyboard.service_selection())
+            await callback.message.answer(MessageFormatter._tpl("booking.choose_service", "Выберите услугу:"), reply_markup=BookingKeyboard.service_selection(settings.services or None))
         else:
             await callback.message.answer("Данные заполнены. Выберите дату и время.")
 
@@ -445,8 +446,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
 
     # УДАЛЕНО: дублирующий хендлер join_waitlist
     # Используется join_waitlist из extended_features_handler.py с callback_data="join_waitlist:"
-            logger.exception("Failed to add to waitlist %s", date_str)
-            await callback.answer(MessageFormatter.error_general(), show_alert=True)
 
     # ── Возврат к выбору даты из выбора времени (H-09) ───────────────────
     @router.callback_query(BookingFSM.choosing_time, F.data == "book_start")

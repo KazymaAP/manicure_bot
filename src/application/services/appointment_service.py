@@ -407,33 +407,38 @@ class AppointmentService:
         """
         return self._appointment_repo.get_all()
 
+    def get_all_active(self) -> list[Appointment]:
+        """Возвращает все активные (не отменённые) записи.
+
+        FIXED: используется в рассылке для получения получателей.
+        """
+        return self._appointment_repo.get_all_active()
+
     def block_user(self, user_id: int, reason: str) -> None:
         """Добавляет пользователя в чёрный список.
+
+        FIXED BUG 7: делегирует в репозиторий вместо прямого доступа к _db.
 
         Args:
             user_id: Telegram ID пользователя.
             reason: Причина блокировки.
         """
-        from datetime import datetime
-        db = self._appointment_repo._db
-        with db.transaction() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO blacklist (user_id, reason, created_at) VALUES (?, ?, ?)",
-                (user_id, reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
+        self._appointment_repo.block_user(user_id, reason)
 
     def unblock_user(self, user_id: int) -> None:
         """Удаляет пользователя из чёрного списка.
 
+        FIXED BUG 7: делегирует в репозиторий.
+
         Args:
             user_id: Telegram ID пользователя.
         """
-        db = self._appointment_repo._db
-        with db.transaction() as conn:
-            conn.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
+        self._appointment_repo.unblock_user(user_id)
 
     def is_user_blocked(self, user_id: int) -> bool:
         """Проверяет, заблокирован ли пользователь.
+
+        FIXED BUG 7: делегирует в репозиторий.
 
         Args:
             user_id: Telegram ID пользователя.
@@ -441,7 +446,4 @@ class AppointmentService:
         Returns:
             True если пользователь в чёрном списке.
         """
-        db = self._appointment_repo._db
-        with db.transaction() as conn:
-            row = conn.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)).fetchone()
-            return row is not None
+        return self._appointment_repo.is_user_blocked(user_id)

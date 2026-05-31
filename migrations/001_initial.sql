@@ -50,15 +50,14 @@ CREATE INDEX IF NOT EXISTS idx_appointments_date    ON appointments(date);
 CREATE INDEX IF NOT EXISTS idx_appointments_active  ON appointments(user_id, is_cancelled);
 
 -- ── Чёрный список (блокировка пользователей) ──────────────────────────────
--- FIXED: добавлена таблица для блокировки пользователей
+-- FIXED BUG 5: схема приведена к единому виду с connection.py (user_id INTEGER PRIMARY KEY)
 CREATE TABLE IF NOT EXISTS blacklist (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL UNIQUE,
+    user_id    INTEGER PRIMARY KEY,
     reason     TEXT,
     created_at TEXT    NOT NULL          -- YYYY-MM-DD HH:MM:SS
 );
 
-CREATE INDEX IF NOT EXISTS idx_blacklist_user_id ON blacklist(user_id);
+-- Индекс не нужен — user_id уже PRIMARY KEY
 
 -- ── Лист ожидания ─────────────────────────────────────────────────────────
 -- FIXED: добавлена таблица для листа ожидания
@@ -90,3 +89,16 @@ CREATE TABLE IF NOT EXISTS backups (
     created_at TEXT    NOT NULL,         -- YYYY-MM-DD HH:MM:SS
     size_bytes INTEGER                   -- Размер бэкапа в байтах
 );
+
+-- ── Пользователи ────────────────────────────────────────────────────────────
+-- FIXED: таблица всех пользователей для рассылки и статистики
+CREATE TABLE IF NOT EXISTS users (
+    user_id    INTEGER PRIMARY KEY,
+    username   TEXT,
+    first_name TEXT,
+    last_name  TEXT,
+    created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);

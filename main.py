@@ -55,6 +55,8 @@ async def main() -> None:
     logging_mw = LoggingMiddleware()
     dp.message.middleware(logging_mw)
     dp.callback_query.middleware(logging_mw)
+    # FIXED: передаём container в data для middleware (трекинг пользователей)
+    dp["container"] = container
     # FIXED: простая защита от флуда — rate limiting middleware per-user
     from src.presentation.middlewares.rate_limit_middleware import RateLimitMiddleware
 
@@ -76,9 +78,11 @@ async def main() -> None:
     reminder_service = container.reminder_service
     reminder_service.start()
     reminder_service.restore_reminders()
-    # FIXED: планируем ежедневный дайджест и бэкап
-    reminder_service.schedule_daily_digest(hour=9, minute=0)  # 9:00 UTC
-    reminder_service.schedule_daily_backup(hour=2, minute=0)  # 2:00 UTC
+    # FIXED: планируем ежедневный дайджест, бэкап, архив и проверку слотов
+    reminder_service.schedule_daily_digest(hour=9, minute=0)   # 9:00 UTC
+    reminder_service.schedule_daily_backup(hour=2, minute=0)   # 2:00 UTC
+    reminder_service.schedule_weekly_archive(hour=3, minute=0) # Вс 3:00 UTC
+    reminder_service.schedule_insufficient_slots_check(hour=10, minute=0)  # 10:00 UTC
     logger.info("Планировщик напоминаний запущен")
 
     # ── Health Server (для мониторинга) ────────────────────────────────────

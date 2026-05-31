@@ -34,14 +34,30 @@ class BookingKeyboard:
         return builder.as_markup()
 
     @staticmethod
-    def service_selection() -> InlineKeyboardMarkup:
-        """Кнопки выбора типа услуги (маникюр/педикюр/покрытие)."""
+    def service_selection(services: dict | None = None) -> InlineKeyboardMarkup:
+        """Кнопки выбора типа услуги.
+
+        FIXED: генерирует кнопки динамически из settings.services (если переданы),
+        иначе использует дефолтный набор.
+
+        Args:
+            services: Словарь услуг вида {name: {price: ..., duration: ...}}.
+        """
         builder = InlineKeyboardBuilder()
-        builder.row(
-            InlineKeyboardButton(text="💅 Маникюр", callback_data="service:manicure"),
-            InlineKeyboardButton(text="🦶 Педикюр", callback_data="service:pedicure"),
-        )
-        builder.row(InlineKeyboardButton(text="✨ Покрытие", callback_data="service:coating"))
+        if services:
+            for name, info in services.items():
+                price = ""
+                if isinstance(info, dict) and info.get("price"):
+                    price = f" — {info['price']} руб."
+                builder.button(text=f"💅 {name}{price}", callback_data=f"service:{name}")
+            builder.adjust(2)
+        else:
+            # Дефолтные услуги
+            builder.row(
+                InlineKeyboardButton(text="💅 Маникюр", callback_data="service:manicure"),
+                InlineKeyboardButton(text="🦶 Педикюр", callback_data="service:pedicure"),
+            )
+            builder.row(InlineKeyboardButton(text="✨ Покрытие", callback_data="service:coating"))
         return builder.as_markup()
 
     @staticmethod
@@ -52,6 +68,19 @@ class BookingKeyboard:
         return builder.as_markup()
 
     # FIXED: добавлены клавиатуры выбора услуги и автозаполнения прошлых данных для удобства UX.
+
+    @staticmethod
+    def time_selection(times: list[str]) -> InlineKeyboardMarkup:
+        """FIXED BUG 3: новый метод для выбора времени при переносе записи.
+
+        Args:
+            times: Список строк «HH:MM».
+        """
+        builder = InlineKeyboardBuilder()
+        for t in times:
+            builder.button(text=f"🕐 {t}", callback_data=f"time:{t}")
+        builder.adjust(3)
+        return builder.as_markup()
 
     @staticmethod
     def confirm() -> InlineKeyboardMarkup:

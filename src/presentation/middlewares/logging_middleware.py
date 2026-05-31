@@ -3,12 +3,14 @@ src/presentation/middlewares/logging_middleware.py — Middleware логиров
 
 ✅ Из v2_tar: LoggingMiddleware
 ✅ Улучшения v4: замер времени выполнения, логирование типа апдейта
+✅ FIXED: трекинг пользователей в таблице users для полноценной рассылки
 """
 from __future__ import annotations
 
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 from aiogram import BaseMiddleware
@@ -18,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class LoggingMiddleware(BaseMiddleware):
-    """Middleware для логирования входящих апдейтов и времени выполнения."""
+    """Middleware для логирования входящих апдейтов и времени выполнения.
+
+    FIXED: также сохраняет/обновляет запись о пользователе в таблице users,
+    чтобы рассылка могла охватить всех взаимодействовавших с ботом.
+    """
 
     async def __call__(
         self,
@@ -32,15 +38,50 @@ class LoggingMiddleware(BaseMiddleware):
         update: TelegramObject = data.get("event_update", event)
         update_type = "unknown"
         user_id = None
+        from_user = None
 
         if hasattr(update, "message") and update.message:
             update_type = "message"
-            user_id = update.message.from_user.id if update.message.from_user else None
+            from_user = update.message.from_user
+            user_id = from_user.id if from_user else None
         elif hasattr(update, "callback_query") and update.callback_query:
             update_type = "callback_query"
-            user_id = update.callback_query.from_user.id if update.callback_query.from_user else None
+            from_user = update.callback_query.from_user
+            user_id = from_user.id if from_user else None
 
         logger.debug("Processing %s from user_id=%s", update_type, user_id)
+
+        # FIXED: сохраняем/обновляем пользователя в таблице users
+        if user_id and from_user:
+            try:
+                container = data.get("container")
+                if container is not None:
+                    db = getattr(container, "_db", None)
+                    if db is not None:
+                        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        with db.transaction() as conn:
+                            conn.execute(
+                                """
+                                INSERT INTO users (user_id, username, first_name, last_name, created_at, last_seen)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(user_id) DO UPDATE SET
+                                    username = excluded.username,
+                                    first_name = excluded.first_name,
+                                    last_name = excluded.last_name,
+                                    last_seen = excluded.last_seen
+                                """,
+                                (
+                                    user_id,
+                                    getattr(from_user, "username", None),
+                                    getattr(from_user, "first_name", None),
+                                    getattr(from_user, "last_name", None),
+                                    now_str,
+                                    now_str,
+                                )
+                            )
+            except Exception:
+                # Не блокируем обработку при ошибке трекинга
+                logger.debug("Failed to track user %s in users table", user_id, exc_info=True)
 
         result = await handler(event, data)
 

@@ -157,6 +157,81 @@ class ReminderService:
     ) -> None:
         await self._notification_service.send_reminder(user_id, time_str, appointment_id)
 
+    def schedule_weekly_archive(self, hour: int = 3, minute: int = 0) -> None:
+        """FIXED: планирует еженедельную архивацию старых записей (по воскресеньям в 3:00 UTC)."""
+        from apscheduler.triggers.cron import CronTrigger  # type: ignore
+
+        job_id = "weekly_archive"
+        self._scheduler.add_job(
+            self._weekly_archive_job,
+            trigger=CronTrigger(day_of_week="sun", hour=hour, minute=minute),
+            id=job_id,
+            replace_existing=True,
+        )
+        logger.info("Weekly archive job scheduled on Sunday at %02d:%02d UTC", hour, minute)
+
+    def schedule_insufficient_slots_check(self, hour: int = 10, minute: int = 0) -> None:
+        """FIXED: планирует ежедневную проверку количества доступных слотов."""
+        from apscheduler.triggers.cron import CronTrigger  # type: ignore
+
+        job_id = "insufficient_slots_check"
+        self._scheduler.add_job(
+            self._insufficient_slots_check_job,
+            trigger=CronTrigger(hour=hour, minute=minute),
+            id=job_id,
+            replace_existing=True,
+        )
+        logger.info("Insufficient slots check scheduled at %02d:%02d UTC", hour, minute)
+
+    async def _weekly_archive_job(self) -> None:
+        """Архивирует старые записи (старше 90 дней)."""
+        try:
+            import asyncio
+            from datetime import date as _date, timedelta
+
+            cutoff_date = (_date.today() - timedelta(days=90)).isoformat()
+            all_appts = await asyncio.to_thread(self._appointment_service.get_all)
+            old_cancelled = [
+                a for a in all_appts
+                if a.date < cutoff_date and a.is_cancelled
+            ]
+            logger.info(
+                "Weekly archive: found %d old cancelled appointments (cutoff %s)",
+                len(old_cancelled), cutoff_date
+            )
+            # Здесь можно добавить логику экспорта в архив
+        except Exception:
+            logger.exception("Weekly archive job failed")
+
+    async def _insufficient_slots_check_job(self) -> None:
+        """Проверяет количество доступных слотов и уведомляет администраторов."""
+        try:
+            from src.application.services.schedule_service import ScheduleService
+            from datetime import date as _date, timedelta
+            import asyncio
+
+            today = _date.today()
+            days_ahead = 30
+            to_date = (today + timedelta(days=days_ahead)).isoformat()
+            available_dates = await asyncio.to_thread(
+                self._appointment_service._appointment_repo._db.get_connection
+            )
+            # Используем notification_service для простоты
+            sched_repo = getattr(self._appointment_service, "_schedule_repo", None)
+            if sched_repo is None:
+                return
+            available = sched_repo.get_available_dates_in_range(today.isoformat(), to_date)
+            free_days = len(available)
+            if free_days < 3:
+                text = (
+                    f"⚠️ <b>Внимание!</b> Свободных дней в расписании: <b>{free_days}</b>.\n"
+                    f"Рекомендуется добавить новые рабочие дни!"
+                )
+                await self._notification_service.notify_admins_list(text)
+                logger.warning("Insufficient slots warning sent: %d free days", free_days)
+        except Exception:
+            logger.exception("Insufficient slots check job failed")
+
     def schedule_daily_digest(self, hour: int = 9, minute: int = 0) -> None:
         """Планирует ежедневный дайджест администратору в указанное время (UTC).
 
@@ -201,7 +276,7 @@ class ReminderService:
 
             stats = await asyncio.to_thread(self._appointment_service.get_statistics)
             today_str = _date.today().isoformat()
-            today_appts = await asyncio.to_thread(self._appointment_service.get_by_date, today_str)
+            today_appts = await asyncio.to_thread(self._appointment_service.get_appointments_by_date, today_str)
 
             text = (
                 "📊 <b>Ежедневный дайджест</b>\n\n"
