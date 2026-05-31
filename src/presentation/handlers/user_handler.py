@@ -265,7 +265,14 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.message(BookingFSM.entering_comment, F.text)
     async def enter_comment(message: Message, state: FSMContext) -> None:
         skip_texts = {"пропустить", "skip", "➡️ пропустить"}
-        comment = None if message.text.strip().lower() in skip_texts else message.text.strip()
+        raw_comment = message.text.strip()
+        # FIXED BUG-M1: ограничение длины комментария до 500 символов
+        if raw_comment.lower() not in skip_texts and len(raw_comment) > 500:
+            await message.answer(
+                "⚠️ Комментарий слишком длинный. Максимум 500 символов. Попробуйте ещё раз:"
+            )
+            return
+        comment = None if raw_comment.lower() in skip_texts else raw_comment
         await state.update_data(comment=comment)
         await _show_confirmation(message, state)
 
@@ -300,6 +307,18 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         await callback.answer()
         data = await state.get_data()
         user_id = callback.from_user.id
+        # FIXED BUG-M3: проверяем наличие обязательных ключей в FSM state.
+        # Если бот перезапустился или истёк TTL state — данные могут отсутствовать,
+        # что приводит к KeyError при data["chosen_date"]. Теперь мягко просим начать заново.
+        required_keys = ("chosen_date", "chosen_time", "client_name", "phone")
+        missing = [k for k in required_keys if not data.get(k)]
+        if missing:
+            await state.clear()
+            await callback.message.answer(
+                "⚠️ Данные записи устарели (возможно, бот был перезапущен). "
+                "Пожалуйста, начните запись заново: нажмите «📅 Записаться»."
+            )
+            return
         import asyncio
         try:
             # Выполняем блокирующую операцию в фоновом потоке, чтобы не блокировать event loop

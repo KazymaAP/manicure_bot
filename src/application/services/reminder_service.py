@@ -14,6 +14,7 @@ from src.application.services.appointment_service import AppointmentService
 
 if TYPE_CHECKING:
     from src.application.services.notification_service import NotificationService
+    from src.application.services.schedule_service import ScheduleService
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class ReminderService:
         admin_ids: list[int] | None = None,
         backup_service: Any | None = None,
         timezone: str = "UTC",
+        schedule_service: ScheduleService | None = None,
     ) -> None:
         self._appointment_service = appointment_service
         self._notification_service = notification_service
@@ -43,6 +45,8 @@ class ReminderService:
         self._admin_ids = admin_ids or []
         self._backup_service = backup_service
         self._timezone = timezone  # FIXED C-06: храним timezone для корректного расчёта напоминаний
+        # FIXED BUG-H2: schedule_service передаётся напрямую, вместо нарушения инкапсуляции через getattr(_schedule_repo)
+        self._schedule_service = schedule_service
 
         # Инициализация планировщика: предпочитаем SQLAlchemyJobStore (персистентность), иначе MemoryJobStore
         try:
@@ -238,8 +242,9 @@ class ReminderService:
     async def _insufficient_slots_check_job(self) -> None:
         """Проверяет количество доступных слотов и уведомляет администраторов.
 
-        FIXED C-01: убран некорректный asyncio.to_thread(get_connection).
-        Теперь используем schedule_repo напрямую через asyncio.to_thread.
+        FIXED BUG-H2: используем self._schedule_service (публичный API) вместо
+        нарушения инкапсуляции через getattr(self._appointment_service, "_schedule_repo", None).
+        Если schedule_service не передан — graceful fallback с предупреждением.
         """
         try:
             from datetime import date as _date, timedelta
@@ -247,21 +252,33 @@ class ReminderService:
 
             today = _date.today()
             days_ahead = 30
-            to_date = (today + timedelta(days=days_ahead)).isoformat()
 
-            # FIXED: получаем schedule_repo из appointment_service (не вызываем get_connection)
-            sched_repo = getattr(self._appointment_service, "_schedule_repo", None)
-            if sched_repo is None:
-                logger.warning("_insufficient_slots_check_job: schedule_repo not found")
-                return
+            if self._schedule_service is not None:
+                # FIXED BUG-H2: используем публичный API schedule_service
+                available = await asyncio.to_thread(
+                    self._schedule_service.get_available_dates,
+                    today,
+                    days_ahead
+                )
+                free_days = len(available)
+            else:
+                # Fallback: обращаемся к schedule_repo через appointment_service
+                # (нежелательно, но сохраняет обратную совместимость если schedule_service не передан)
+                sched_repo = getattr(self._appointment_service, "_schedule_repo", None)
+                if sched_repo is None:
+                    logger.warning(
+                        "_insufficient_slots_check_job: neither schedule_service nor schedule_repo found. "
+                        "Pass schedule_service to ReminderService for correct behaviour."
+                    )
+                    return
+                to_date = (today + timedelta(days=days_ahead)).isoformat()
+                available = await asyncio.to_thread(
+                    sched_repo.get_available_dates_in_range,
+                    today.isoformat(),
+                    to_date
+                )
+                free_days = len(available)
 
-            # Запускаем синхронный SQL-вызов в отдельном потоке (не блокируем event loop)
-            available = await asyncio.to_thread(
-                sched_repo.get_available_dates_in_range,
-                today.isoformat(),
-                to_date
-            )
-            free_days = len(available)
             if free_days < 3:
                 text = (
                     f"⚠️ <b>Внимание!</b> Свободных дней в расписании: <b>{free_days}</b>.\n"

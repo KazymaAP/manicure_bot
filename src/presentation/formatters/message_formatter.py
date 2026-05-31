@@ -7,6 +7,7 @@ FIXED: теперь использует config.json (через Container loade
 
 from datetime import datetime
 from typing import Any
+import html
 import os
 import json
 from functools import lru_cache
@@ -14,6 +15,15 @@ from functools import lru_cache
 from src.domain.models.appointment import Appointment
 from src.domain.models.time_slot import TimeSlot
 from src.presentation.constants import MONTHS_RU_GEN
+
+
+def _escape(value: Any) -> str:
+    """FIXED BUG-M2: экранирует HTML-спецсимволы в пользовательских данных.
+
+    Предотвращает непредвиденное форматирование в Telegram при parse_mode=HTML.
+    Пример: имя '</b>hacked<b>' → '&lt;/b&gt;hacked&lt;b&gt;' (безопасно отображается).
+    """
+    return html.escape(str(value)) if value is not None else ""
 
 
 @lru_cache(maxsize=1)
@@ -138,19 +148,24 @@ class MessageFormatter:
     ) -> str:
         d = datetime.strptime(date_str, "%Y-%m-%d")
         formatted_date = f"{d.day} {MONTHS_RU_GEN[d.month]} {d.year}"
-        comment_line = f"\n💬 Комментарий: {comment}" if comment else ""
-        service_line = f"\n💼 Услуга: <b>{service}</b>" if service else ""
+        # FIXED BUG-M2: экранируем пользовательские данные перед вставкой в HTML-шаблон
+        safe_name = _escape(client_name)
+        safe_phone = _escape(phone)
+        safe_comment = _escape(comment) if comment else None
+        safe_service = _escape(service) if service else None
+        comment_line = f"\n💬 Комментарий: {safe_comment}" if safe_comment else ""
+        service_line = f"\n💼 Услуга: <b>{safe_service}</b>" if safe_service else ""
         default = (
             "📋 <b>Подтвердите запись:</b>\n\n"
             f"📅 Дата: <b>{formatted_date}</b>\n"
             f"🕐 Время: <b>{time_str}</b>\n"
-            f"👤 Имя: <b>{client_name}</b>\n"
-            f"📱 Телефон: <b>{phone}</b>"
+            f"👤 Имя: <b>{safe_name}</b>\n"
+            f"📱 Телефон: <b>{safe_phone}</b>"
             f"{service_line}"
             f"{comment_line}\n\n"
             "Всё верно?"
         )
-        return MessageFormatter._tpl("booking.confirmation", default, date=formatted_date, time=time_str, client_name=client_name, phone=phone, comment=comment, service=service)
+        return MessageFormatter._tpl("booking.confirmation", default, date=formatted_date, time=time_str, client_name=safe_name, phone=safe_phone, comment=safe_comment, service=safe_service)
 
     @staticmethod
     def booking_success(date_str: str, time_str: str, hours_before: int = 24) -> str:
@@ -260,14 +275,18 @@ class MessageFormatter:
         d = datetime.strptime(appt.date, "%Y-%m-%d")
         formatted_date = f"{d.day} {MONTHS_RU_GEN[d.month]} {d.year}"
         status = "✅ Активна" if appt.is_active else "❌ Отменена"
-        comment = f"\n💬 Комментарий: {appt.comment}" if appt.comment else ""
+        # FIXED BUG-M2: экранируем данные клиента перед вставкой в HTML
+        safe_name = _escape(appt.client_name)
+        safe_phone = _escape(appt.phone)
+        safe_comment = _escape(appt.comment) if appt.comment else None
+        comment = f"\n💬 Комментарий: {safe_comment}" if safe_comment else ""
         appt_id_display = f"{appt.id}" if appt.id is not None else "?"
         return (
             f"📋 <b>Запись #{appt_id_display}</b>\n\n"
             f"📅 Дата: {formatted_date}\n"
             f"🕐 Время: {appt.time}\n"
-            f"👤 Клиент: {appt.client_name}\n"
-            f"📱 Телефон: {appt.phone}\n"
+            f"👤 Клиент: {safe_name}\n"
+            f"📱 Телефон: {safe_phone}\n"
             f"📊 Статус: {status}"
             f"{comment}"
         )
@@ -358,18 +377,22 @@ class MessageFormatter:
         client_name: str, phone: str, date: str, time: str,
         appt_id: int | None, username: str | None, user_id: int,
     ) -> str:
-        uname = f"@{username}" if username else "—"
+        # FIXED BUG-M2: экранируем данные пользователя
+        safe_name = _escape(client_name)
+        safe_phone = _escape(phone)
+        safe_username = _escape(username) if username else None
+        uname = f"@{safe_username}" if safe_username else "—"
         appt_display = f"#{appt_id}" if appt_id is not None else "#-"
         default = (
             "🌸 <b>Новая запись!</b>\n\n"
-            f"👤 Клиент: <b>{client_name}</b>\n"
-            f"📞 Телефон: <code>{phone}</code>\n"
+            f"👤 Клиент: <b>{safe_name}</b>\n"
+            f"📞 Телефон: <code>{safe_phone}</code>\n"
             f"📅 Дата: <b>{date}</b>\n"
             f"🕐 Время: <b>{time}</b>\n"
             f"🔖 ID записи: <code>{appt_display}</code>\n"
             f"Telegram: {uname} (ID: <code>{user_id}</code>)"
         )
-        return MessageFormatter._tpl("notify.new_booking", default, client_name=client_name, phone=phone, date=date, time=time, appt_id=appt_id, username=username, user_id=user_id)
+        return MessageFormatter._tpl("notify.new_booking", default, client_name=safe_name, phone=safe_phone, date=date, time=time, appt_id=appt_id, username=safe_username, user_id=user_id)
 
     @staticmethod
     def notify_admin_cancellation(

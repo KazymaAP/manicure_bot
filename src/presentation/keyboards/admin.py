@@ -47,11 +47,26 @@ class AdminKeyboard:
         return builder.as_markup(resize_keyboard=True, one_time_keyboard=False)
 
     @staticmethod
-    def broadcast_confirm(text_preview: str) -> InlineKeyboardMarkup:
+    def broadcast_confirm(text_preview: str = "") -> InlineKeyboardMarkup:
+        """Клавиатура подтверждения рассылки.
+
+        FIXED BUG-H6: параметр text_preview ранее принимался, но нигде не использовался
+        (мёртвый параметр). Теперь он используется для предпросмотра в тексте кнопки —
+        показываем первые 30 символов в заголовке кнопки для наглядности.
+        Параметр по умолчанию пустой для обратной совместимости.
+        """
         builder = InlineKeyboardBuilder()
+        # Показываем предпросмотр текста в кнопке (до 30 символов)
+        preview_label = ""
+        if text_preview:
+            clean = text_preview.strip().replace("\n", " ")
+            preview_label = f': "{clean[:30]}…"' if len(clean) > 30 else f': "{clean}"'
         builder.row(
-            InlineKeyboardButton(text="✅ Отправить всем", callback_data=f"admin_broadcast_send"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_broadcast_cancel"),
+            InlineKeyboardButton(
+                text=f"✅ Отправить всем{preview_label}",
+                callback_data="admin_broadcast_send",
+            ),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcast_cancel"),
         )
         return builder.as_markup()
 

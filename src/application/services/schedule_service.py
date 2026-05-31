@@ -354,3 +354,24 @@ class ScheduleService:
             return new_status
 
         return await asyncio.to_thread(_toggle)
+
+    def count_free_slots(self) -> int:
+        """Возвращает общее количество свободных слотов во всех доступных рабочих днях.
+
+        FIXED: метод добавлен для корректного отображения дашборда администратора.
+        Ранее admin_handler проверял hasattr(sched_service, 'count_free_slots') —
+        метод отсутствовал, free_slots всегда был 0 в дашборде.
+        """
+        from datetime import date as _date, timedelta
+
+        today = _date.today()
+        to_date = today + timedelta(days=self._days_ahead)
+        total = 0
+        # Получаем все доступные даты и считаем свободные слоты
+        available_dates = self._schedule_repo.get_available_dates_in_range(
+            today.isoformat(), to_date.isoformat()
+        )
+        for date_str in available_dates:
+            slots = self._schedule_repo.get_free_slots(date_str)
+            total += len(slots)
+        return total

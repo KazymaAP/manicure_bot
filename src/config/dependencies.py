@@ -180,6 +180,8 @@ class Container:
             jobstore_url = None
 
         # FIXED C-06: передаём timezone для корректного расчёта времени напоминаний
+        # FIXED BUG-H2: передаём schedule_service напрямую, чтобы ReminderService
+        # не нарушал инкапсуляцию через getattr(_schedule_repo)
         self._reminder_service = ReminderService(
             appointment_service=self._appointment_service,
             notification_service=self._notification_service,
@@ -188,6 +190,7 @@ class Container:
             admin_ids=self._settings.admin_ids,
             backup_service=backup_service,
             timezone=self._settings.timezone,
+            schedule_service=self._schedule_service,
         )
         logger.info("All services built successfully.")
 

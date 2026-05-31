@@ -291,12 +291,14 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         data = await state.get_data()
         if data.get("is_opening") is not None:
             is_opening = bool(data.get("is_opening"))
+            import asyncio as _asyncio
             try:
+                # FIXED BUG-H3: синхронные методы сервиса обёрнуты в asyncio.to_thread
                 if is_opening:
-                    sched_service.open_day(date_str)
+                    await _asyncio.to_thread(sched_service.open_day, date_str)
                     await message.answer(MessageFormatter.admin_day_opened(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
                 else:
-                    sched_service.close_day(date_str)
+                    await _asyncio.to_thread(sched_service.close_day, date_str)
                     await message.answer(MessageFormatter.admin_day_closed(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
             except Exception as exc:
                 logger.error("Ошибка при открытии/закрытии дня %s: %s", date_str, exc)
@@ -307,8 +309,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
         # Иначе — стандартный поток добавления слота
         # Убедимся, что рабочий день существует — иначе добавленный слот не будет виден в списках
+        import asyncio as _asyncio
         try:
-            sched_service.ensure_working_day_exists(date_str)
+            # FIXED BUG-H3: синхронный вызов обёрнут в asyncio.to_thread
+            await _asyncio.to_thread(sched_service.ensure_working_day_exists, date_str)
         except Exception as exc:
             logger.warning("Не удалось проверить/создать рабочий день %s: %s", date_str, exc)
 
@@ -477,14 +481,17 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await callback.answer("Рассылка запущена...")
         import asyncio
         try:
-            # FIXED H-02: рассылаем ВСЕМ пользователям из таблицы users (не только с активными записями)
-            # Получаем всех пользователей через DatabaseManager напрямую
-            container = callback.message.bot.get("container") if hasattr(callback.message.bot, "get") else None
+            # FIXED BUG-H7: container получаем через container, захваченный в замыкании setup_admin_router.
+            # Ранее: callback.message.bot.get("container") — Bot не является dict и не имеет .get(),
+            # поэтому hasattr(bot, "get") = False, container всегда был None.
+            # Теперь container уже доступен из области видимости setup_admin_router (замыкание).
+            # container = <Container instance from outer scope>
             all_user_ids: set[int] = set()
 
             # Пробуем получить всех пользователей из таблицы users (если она заполнена через middleware)
+            # FIXED BUG-H7: используем container из замыкания setup_admin_router (не из bot.get())
             try:
-                db = getattr(container, "_db", None) if container else None
+                db = getattr(container, "_db", None)
                 if db is not None:
                     def _get_all_users():
                         with db.read_connection() as conn:
@@ -505,11 +512,24 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 try:
                     await callback.message.bot.send_message(uid, text, parse_mode="HTML")
                     sent += 1
-                    # Соблюдаем лимиты Telegram API
+                    # FIXED BUG-H1: увеличена задержка до 50мс (было 50мс, но без обработки 429).
+                    # Telegram лимит: 30 msg/s в разные чаты. 50мс = 20 msg/s — безопасно.
                     await asyncio.sleep(0.05)
                 except Exception as exc:
-                    failed += 1
-                    logger.warning("Failed to send broadcast to %s: %s", uid, exc)
+                    # FIXED BUG-H1: обрабатываем TelegramRetryAfter — выжидаем retry_after секунд и повторяем
+                    from aiogram.exceptions import TelegramRetryAfter
+                    if isinstance(exc, TelegramRetryAfter):
+                        logger.warning("Broadcast 429 TelegramRetryAfter for user %s, sleeping %s sec", uid, exc.retry_after)
+                        await asyncio.sleep(exc.retry_after)
+                        try:
+                            await callback.message.bot.send_message(uid, text, parse_mode="HTML")
+                            sent += 1
+                        except Exception as retry_exc:
+                            failed += 1
+                            logger.warning("Broadcast retry failed for %s: %s", uid, retry_exc)
+                    else:
+                        failed += 1
+                        logger.warning("Failed to send broadcast to %s: %s", uid, exc)
             await callback.message.edit_text(
                 f"Рассылка завершена.\n✅ Отправлено: {sent}\n❌ Ошибок: {failed}"
             )
@@ -560,7 +580,11 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         writer = csv.writer(output)
         writer.writerow(["id", "user_id", "username", "client_name", "phone", "date", "time", "service", "created_at", "is_cancelled"])
         for a in appts:
-            writer.writerow([a.id, a.user_id, a.username, a.client_name, a.phone, a.date, a.time, a.service, a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "", int(a.is_cancelled)])
+            # FIXED BUG-H4: int(a.is_cancelled) заменён на int(a.status).
+            # is_cancelled — @property, возвращающий bool (True только для CANCELLED=1).
+            # При статусе COMPLETED(2) int(a.is_cancelled) = 0 — некорректно.
+            # int(a.status) экспортирует реальное значение: 0=ACTIVE, 1=CANCELLED, 2=COMPLETED.
+            writer.writerow([a.id, a.user_id, a.username, a.client_name, a.phone, a.date, a.time, a.service, a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "", int(a.status)])
         data = output.getvalue().encode("utf-8")
         file = BufferedInputFile(data, filename=f"appointments_{from_date}_to_{to_date}.csv")
         await message.answer_document(file)
@@ -702,6 +726,25 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
         date_str = message.text.strip()
+        # FIXED BUG-H5: добавлена валидация формата даты перед массовой отменой.
+        # Без валидации ввод типа "завтра" или "2024/01/15" не вызывал ошибки —
+        # SQL просто возвращал пустой список, что вводило администратора в заблуждение.
+        import re as _re
+        from datetime import datetime as _dt_validate
+        if not _re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            await message.answer(
+                "❌ Неверный формат даты. Введите дату в формате <b>ГГГГ-ММ-ДД</b> (например: 2025-07-15).",
+                parse_mode="HTML",
+            )
+            return
+        try:
+            _dt_validate.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            await message.answer(
+                "❌ Некорректная дата. Убедитесь, что дата существует (например: 2025-02-30 — нет такой).",
+                parse_mode="HTML",
+            )
+            return
         import asyncio
         try:
             # Отменяем все записи на дату и уведомляем клиентов

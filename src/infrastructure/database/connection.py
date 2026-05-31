@@ -208,7 +208,9 @@ class DatabaseManager:
                 date        TEXT    NOT NULL,
                 time        TEXT    NOT NULL,
                 is_booked   INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(date, time)
+                UNIQUE(date, time),
+                -- FIXED BUG-C3: добавлен FOREIGN KEY для каскадного удаления слотов при удалении дня
+                FOREIGN KEY (date) REFERENCES working_days(date) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS appointments (

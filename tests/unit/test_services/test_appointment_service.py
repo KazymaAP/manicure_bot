@@ -15,6 +15,22 @@ from src.domain.exceptions.appointment import (
     SlotAlreadyBookedError,
 )
 from src.domain.models.appointment import Appointment
+from src.infrastructure.database.connection import DatabaseManager
+
+
+@pytest.fixture(autouse=True)
+def reset_db_singleton():
+    """FIXED BUG-C2: автоматически сбрасывает Singleton DatabaseManager между тестами.
+
+    Без этого Singleton остаётся живым после первого теста с реальной БД,
+    что вызывает RuntimeError при попытке переинициализации с другим db_path.
+    autouse=True гарантирует выполнение для каждого теста в модуле.
+    """
+    # Сбрасываем перед тестом (на случай если предыдущий тест оставил состояние)
+    DatabaseManager.reset()
+    yield
+    # Сбрасываем после теста (очистка после возможного интеграционного теста с реальной БД)
+    DatabaseManager.reset()
 
 
 @pytest.fixture

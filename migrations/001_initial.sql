@@ -18,12 +18,16 @@ CREATE TABLE IF NOT EXISTS working_days (
 CREATE INDEX IF NOT EXISTS idx_working_days_date ON working_days(date);
 
 -- ── Слоты времени ─────────────────────────────────────────────────────────
+-- FIXED BUG-C3: добавлен FOREIGN KEY (date) REFERENCES working_days(date) ON DELETE CASCADE
+-- Ранее отсутствовал: PRAGMA foreign_keys=ON не защищал осиротевшие слоты.
+-- Теперь при удалении рабочего дня все его слоты удаляются автоматически.
 CREATE TABLE IF NOT EXISTS time_slots (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     date      TEXT    NOT NULL,          -- YYYY-MM-DD (текстовый ключ)
     time      TEXT    NOT NULL,          -- HH:MM
     is_booked INTEGER NOT NULL DEFAULT 0,-- 0=свободен, 1=забронирован
-    UNIQUE(date, time)
+    UNIQUE(date, time),
+    FOREIGN KEY (date) REFERENCES working_days(date) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_time_slots_date      ON time_slots(date);
