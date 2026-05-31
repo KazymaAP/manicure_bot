@@ -38,6 +38,9 @@ class BackupService:
 
     def create_backup(self) -> str | None:
         """Создаёт резервную копию БД с ротацией старых файлов.
+        
+        FIXED: используется sqlite3.backup API вместо shutil.copy2 для безопасного хот-бэкапа
+        с корректным обработкой WAL-режима.
 
         Returns:
             Путь к созданному бэкапу или None при ошибке.
@@ -47,15 +50,25 @@ class BackupService:
             return None
 
         try:
+            import sqlite3
+            
             # Формируем имя файла с меткой времени
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             db_name = os.path.basename(self.db_path)
             backup_name = f"backup_{timestamp}_{db_name}"
             backup_path = os.path.join(self.backup_dir, backup_name)
 
-            # Копируем файл БД (с её WAL-файлами если они есть)
-            shutil.copy2(self.db_path, backup_path)
-            logger.info("Backup created: %s", backup_path)
+            # Используем встроенный SQLite backup API для безопасного хот-бэкапа
+            src_conn = sqlite3.connect(self.db_path)
+            dst_conn = sqlite3.connect(backup_path)
+            
+            try:
+                # Это корректно обрабатывает WAL и гарантирует консистентность
+                src_conn.backup(dst_conn)
+                logger.info("Backup created: %s", backup_path)
+            finally:
+                dst_conn.close()
+                src_conn.close()
 
             # Ротация: удаляем старые бэкапы
             self._rotate_backups()

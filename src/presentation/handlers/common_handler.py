@@ -15,8 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 def _get_portfolio(settings) -> str | None:
-    """Возвращает URL портфолио или None если не задан."""
-    return settings.portfolio_url or None
+    """Возвращает URL портфолио или None если не задан.
+    
+    FIXED: убрана избыточная операция `or None`.
+    """
+    return settings.portfolio_url
 
 
 router = Router(name="common")

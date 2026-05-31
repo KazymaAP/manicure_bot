@@ -361,7 +361,7 @@ class AppointmentService:
         else:  # "all"
             return self._appointment_repo.get_all()
 
-    # 新增: wrapper для поиска и диапазона — используются в админ-панели
+    # Вспомогательные методы для поиска и диапазонов — используются в админ-панели
     def get_by_date_range(self, from_date: str, to_date: str) -> list[Appointment]:
         return self._appointment_repo.get_by_date_range(from_date, to_date)
 
@@ -406,3 +406,42 @@ class AppointmentService:
         FIXED: фича #38 — для архивирования старых записей.
         """
         return self._appointment_repo.get_all()
+
+    def block_user(self, user_id: int, reason: str) -> None:
+        """Добавляет пользователя в чёрный список.
+
+        Args:
+            user_id: Telegram ID пользователя.
+            reason: Причина блокировки.
+        """
+        from datetime import datetime
+        db = self._appointment_repo._db
+        with db.transaction() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO blacklist (user_id, reason, created_at) VALUES (?, ?, ?)",
+                (user_id, reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
+
+    def unblock_user(self, user_id: int) -> None:
+        """Удаляет пользователя из чёрного списка.
+
+        Args:
+            user_id: Telegram ID пользователя.
+        """
+        db = self._appointment_repo._db
+        with db.transaction() as conn:
+            conn.execute("DELETE FROM blacklist WHERE user_id = ?", (user_id,))
+
+    def is_user_blocked(self, user_id: int) -> bool:
+        """Проверяет, заблокирован ли пользователь.
+
+        Args:
+            user_id: Telegram ID пользователя.
+
+        Returns:
+            True если пользователь в чёрном списке.
+        """
+        db = self._appointment_repo._db
+        with db.transaction() as conn:
+            row = conn.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)).fetchone()
+            return row is not None

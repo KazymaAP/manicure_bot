@@ -101,6 +101,7 @@ class DatabaseManager:
         """Создаёт или переиспользует соединение для текущего потока (per-thread reuse).
 
         FIXED: не закрываем соединение автоматически — управление жизненным циклом перенесено в close()/reset().
+        FIXED: регистрируем соединение в self._connections для правильного закрытия при shutdown.
         """
         if not hasattr(self._thread_local, 'conn') or self._thread_local.conn is None:
             conn = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -110,6 +111,10 @@ class DatabaseManager:
             conn.execute("PRAGMA cache_size=-8000")
             conn.execute("PRAGMA temp_store=MEMORY")
             self._thread_local.conn = conn
+            # FIXED: регистрируем соединение в реестре для полного отслеживания
+            thread_id = threading.get_ident()
+            with self._connections_lock:
+                self._connections[thread_id] = conn
         return self._thread_local.conn
 
     @contextmanager
@@ -118,13 +123,14 @@ class DatabaseManager:
 
         FIXED: поддержка вложенных транзакций — если транзакция уже активна,
         просто возвращаем соединение без начинания новой (аналог SAVEPOINT).
+        FIXED: используем conn.in_transaction вместо isolation_level (более надёжно).
         """
         conn = self.get_connection()
         in_transaction = False
         try:
             # Проверяем есть ли уже активная транзакция
-            # (isolation_level = None означает, что соединение в режиме autocommit)
-            if conn.isolation_level is not None:
+            # in_transaction — стандартный способ для Python 3.2+
+            if hasattr(conn, 'in_transaction') and conn.in_transaction:
                 # Уже в транзакции, просто возвращаем соединение
                 yield conn
             else:

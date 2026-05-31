@@ -224,16 +224,28 @@ class ScheduleService:
         """
         return self._schedule_repo.delete_time_slot(date_str, time_str)
 
-    # ── Алиасы и удобные методы для хэндлеров ────────────────────────────
+     # ── Алиасы и удобные методы для хэндлеров ────────────────────────────
 
     async def get_available_dates_async(self) -> list[str]:
-        """Async-обёртка: возвращает список доступных дат."""
-        result = self.get_available_dates(from_date=_date.today(), days_ahead=self._days_ahead)
+        """Async-обёртка: возвращает список доступных дат.
+        
+        FIXED: обвёрнут синхронный SQL-запрос в asyncio.to_thread чтобы не блокировать event loop.
+        """
+        import asyncio
+        result = await asyncio.to_thread(
+            self.get_available_dates,
+            from_date=_date.today(),
+            days_ahead=self._days_ahead
+        )
         return sorted(result)
 
     async def get_available_slots(self, date_str: str) -> list[TimeSlot]:
-        """Async-обёртка для get_free_slots."""
-        return self._schedule_repo.get_free_slots(date_str)
+        """Async-обёртка для get_free_slots.
+        
+        FIXED: обвёрнут синхронный SQL-запрос в asyncio.to_thread чтобы не блокировать event loop.
+        """
+        import asyncio
+        return await asyncio.to_thread(self._schedule_repo.get_free_slots, date_str)
 
     def get_workday_templates(self) -> list[dict]:
         """Возвращает все сохранённые шаблоны рабочих дней."""

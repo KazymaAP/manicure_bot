@@ -105,30 +105,8 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         else:
             await callback.message.answer("Данные заполнены. Выберите дату и время.")
 
-    @router.callback_query(F.data.startswith("transfer_appt:"))
-    async def transfer_appt(callback: CallbackQuery, state: FSMContext) -> None:
-        """Инициирует перенос записи пользователем."""
-        import asyncio
-        appt_id = int(callback.data.split(":")[1])
-        appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
-        if not appt:
-            await callback.answer(MessageFormatter.appointment_not_found(), show_alert=True)
-            return
-        if appt.user_id != callback.from_user.id:
-            await callback.answer("Вы не можете переносить чужую запись.", show_alert=True)
-            return
-        # Сохраняем данные в state и предлагаем выбрать новую дату
-        await state.update_data(transfer_source=appt_id, client_name=appt.client_name, phone=appt.phone, comment=appt.comment, service=appt.service)  # FIXED: сохраняем тип услуги из записи (service)
-        available_dates = await sched_service.get_available_dates_async()
-        if not available_dates:
-            await callback.message.answer(MessageFormatter.no_available_dates())
-            await state.clear()
-            return
-        today = _date.today()
-        cal = CalendarKeyboard.build(year=today.year, month=today.month, available_dates=set(available_dates))
-        await state.set_state(BookingFSM.choosing_date)
-        await callback.message.edit_text(MessageFormatter.choose_date(), reply_markup=cal)
-        await callback.answer()
+    # УДАЛЕНО: дублирующий хендлер transfer_appt
+    # Используется transfer_appointment_start из extended_features_handler.py с callback_data="transfer_appt:"
 
     # ── Навигация по календарю ────────────────────────────────────────────
     @router.callback_query(BookingFSM.choosing_date, F.data.startswith("cal_prev:") | F.data.startswith("cal_next:"))
@@ -173,7 +151,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         if not slots:
             # Предложим пользователю встать в лист ожидания
             from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔔 Уведомить о свободном месте", callback_data=f"waitlist:{date_str}")]])
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔔 Уведомить о свободном месте", callback_data=f"join_waitlist:{date_str}")]])
             await callback.answer(MessageFormatter.no_available_slots(), show_alert=True)
             await callback.message.answer(MessageFormatter.no_available_slots(), reply_markup=kb)
             return
@@ -394,7 +372,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
 
     # ── Мои записи ────────────────────────────────────────────────────────
     @router.message(F.text == "📋 Мои записи")
-    @router.message(Command("mybookings"))
     async def my_appointments(message: Message) -> None:
         import asyncio
         # FIXED: проверка подписки
@@ -427,9 +404,8 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         # FIXED: добавляем кнопку переноса к каждому элементу списка — пользователь сможет выбрать новую дату/время
         # Реализовано через callback transfer_appt:<id>
 
-    # ── Ближайшие слоты (команда /slots или кнопка)
+    # ── Ближайшие слоты (только кнопка, Command в final_features_handler.py)
     @router.message(F.text == "🟢 Ближайшие слоты")
-    @router.message(Command("slots"))
     async def nearest_slots(message: Message) -> None:
         slots = await sched_service.get_nearest_slots_async(limit=5)
         if not slots:
@@ -467,17 +443,8 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             if not answered:
                 await callback.answer()
 
-    @router.callback_query(F.data.startswith("waitlist:"))
-    async def join_waitlist(callback: CallbackQuery) -> None:
-        _, date_str = callback.data.split(":", 1)
-        import asyncio
-        try:
-            added = await asyncio.to_thread(sched_service.join_waitlist, callback.from_user.id, date_str)
-            if added:
-                await callback.answer("Вы добавлены в лист ожидания на выбранную дату. Мы уведомим вас, когда появится слот.")
-            else:
-                await callback.answer("Вы уже в листе ожидания на эту дату.", show_alert=True)
-        except Exception:
+    # УДАЛЕНО: дублирующий хендлер join_waitlist
+    # Используется join_waitlist из extended_features_handler.py с callback_data="join_waitlist:"
             logger.exception("Failed to add to waitlist %s", date_str)
             await callback.answer(MessageFormatter.error_general(), show_alert=True)
 

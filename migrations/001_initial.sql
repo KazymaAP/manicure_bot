@@ -41,9 +41,52 @@ CREATE TABLE IF NOT EXISTS appointments (
     created_at    TEXT    NOT NULL,      -- YYYY-MM-DD HH:MM:SS
     reminder_sent INTEGER NOT NULL DEFAULT 0,
     is_cancelled  INTEGER NOT NULL DEFAULT 0,
-    comment       TEXT
+    comment       TEXT,
+    service       TEXT                   -- FIXED: тип услуги (добавлено в v4)
 );
 
 CREATE INDEX IF NOT EXISTS idx_appointments_user_id ON appointments(user_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_date    ON appointments(date);
 CREATE INDEX IF NOT EXISTS idx_appointments_active  ON appointments(user_id, is_cancelled);
+
+-- ── Чёрный список (блокировка пользователей) ──────────────────────────────
+-- FIXED: добавлена таблица для блокировки пользователей
+CREATE TABLE IF NOT EXISTS blacklist (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL UNIQUE,
+    reason     TEXT,
+    created_at TEXT    NOT NULL          -- YYYY-MM-DD HH:MM:SS
+);
+
+CREATE INDEX IF NOT EXISTS idx_blacklist_user_id ON blacklist(user_id);
+
+-- ── Лист ожидания ─────────────────────────────────────────────────────────
+-- FIXED: добавлена таблица для листа ожидания
+CREATE TABLE IF NOT EXISTS waitlist (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    date       TEXT    NOT NULL,         -- YYYY-MM-DD
+    created_at TEXT    NOT NULL,         -- YYYY-MM-DD HH:MM:SS
+    UNIQUE(user_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_waitlist_date    ON waitlist(date);
+CREATE INDEX IF NOT EXISTS idx_waitlist_user_id ON waitlist(user_id);
+
+-- ── Шаблоны расписания ────────────────────────────────────────────────────
+-- FIXED: добавлена таблица для шаблонов рабочих дней
+CREATE TABLE IF NOT EXISTS workday_templates (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    slots      TEXT    NOT NULL,         -- JSON список временных слотов
+    created_at TEXT    NOT NULL          -- YYYY-MM-DD HH:MM:SS
+);
+
+-- ── Бэкапы ────────────────────────────────────────────────────────────────
+-- FIXED: добавлена таблица для отслеживания бэкапов (опционально)
+CREATE TABLE IF NOT EXISTS backups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    backup_path TEXT    NOT NULL,
+    created_at TEXT    NOT NULL,         -- YYYY-MM-DD HH:MM:SS
+    size_bytes INTEGER                   -- Размер бэкапа в байтах
+);

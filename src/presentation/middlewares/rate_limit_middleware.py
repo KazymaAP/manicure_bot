@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-import threading
 from collections import defaultdict
 from typing import Any
 
@@ -17,13 +17,14 @@ class RateLimitMiddleware(BaseMiddleware):
 
     FIXED: предотвращает всплески от одного пользователя — ограничение по количеству
     операций в секундах. Для продакшена можно заменить на Redis-based throttling.
+    FIXED: заменён threading.Lock на asyncio.Lock для безопасности в async контексте.
     """
 
     def __init__(self, calls: int = 5, per_seconds: int = 5) -> None:
         super().__init__()
         self.calls = calls
         self.per_seconds = per_seconds
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._buckets: dict[int, list[float]] = defaultdict(list)
 
     async def __call__(self, handler, event: TelegramObject, data: dict[str, Any]):
@@ -42,7 +43,7 @@ class RateLimitMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         now = time.time()
-        with self._lock:
+        async with self._lock:
             bucket = self._buckets[user_id]
             # Удаляем старые записи
             while bucket and bucket[0] <= now - self.per_seconds:

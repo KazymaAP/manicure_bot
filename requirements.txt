@@ -4,5 +4,11 @@ pydantic-settings==2.6.1
 apscheduler[sqlalchemy]==3.10.4
 python-dotenv==1.0.1
 SQLAlchemy==2.0.20
-# DEV: pytest and pytest-asyncio removed from production requirements (move to dev-requirements.txt)
-# FIXED: добавить SQLAlchemy и использовать apscheduler[sqlalchemy] для персистентного jobstore
+# FIXED: добавить aiohttp для health_server.py
+aiohttp==3.9.1
+# FIXED: добавить тестовые зависимости (используются в GitHub Actions и локально)
+pytest==7.4.3
+pytest-asyncio==0.23.2
+# FIXED: добавить mypy для type checking (используется в GitHub Actions)
+mypy==1.7.1
+types-aiohttp==3.9.2

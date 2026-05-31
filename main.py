@@ -96,22 +96,14 @@ async def main() -> None:
     except Exception as exc:
         logger.warning("Failed to start health server: %s", exc)
 
-    # ── Запуск polling или webhook ────────────────────────────
+    # ── Запуск polling ────────────────────────────────────────────────────
     try:
-        # FIXED: фича #40 — поддержка webhook режима если настроен
-        if settings.webhook_url:
-            logger.info("Запуск бота в режиме webhook: %s", settings.webhook_url)
-            await bot.set_webhook(settings.webhook_url)
-            # Вместо polling используем webhook сервер (нужен отдельный код для aiohttp)
-            logger.warning("Webhook requires custom server implementation (currently not fully integrated)")
-            # Fallback на polling
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("Fallback to polling mode")
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-        else:
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("Бот запущен. Ожидаю обновления…")
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        # FIXED: удалён мёртвый webhook код
+        # Webhook режим не реализован. Используем polling для совместимости.
+        # Для webhook режима нужна отдельная реализация с aiohttp/FastAPI сервером.
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Бот запущен. Ожидаю обновления…")
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         # Грамотно останавливаем health server
         if health_server:

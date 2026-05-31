@@ -98,7 +98,7 @@ class Appointment:
             reminder_sent=bool(row.get("reminder_sent", 0)),
             status=AppointmentStatus(row.get("is_cancelled", 0)),
             comment=row.get("comment"),
-        service=row.get("service"),
+            service=row.get("service"),
         )
 
     def to_dict(self) -> dict:

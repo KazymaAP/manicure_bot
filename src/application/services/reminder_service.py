@@ -114,10 +114,21 @@ class ReminderService:
             logger.info("Reminder (%dh) scheduled for appointment #%s at %s UTC", hrs, appointment_id, remind_at)
 
     def cancel_reminder(self, appointment_id: int) -> None:
-        job_id = f"{_JOB_PREFIX}{appointment_id}"
-        if self._scheduler.get_job(job_id):
-            self._scheduler.remove_job(job_id)
-            logger.info("Reminder cancelled for appointment #%s", appointment_id)
+        """Отменяет все напоминания для записи (все суффиксы часов).
+        
+        FIXED: отменяет напоминания со ВСЕМИ суффиксами {24, 2, 1}, а не только базовый ID.
+        """
+        cancelled = False
+        # Перебираем все возможные часы для напоминаний
+        for hrs in {24, 2, 1}:
+            job_id = f"{_JOB_PREFIX}{appointment_id}_{hrs}"
+            if self._scheduler.get_job(job_id):
+                self._scheduler.remove_job(job_id)
+                cancelled = True
+                logger.info("Reminder (%dh) cancelled for appointment #%s", hrs, appointment_id)
+        
+        if not cancelled:
+            logger.warning("No reminders found for appointment #%s", appointment_id)
 
     def restore_reminders(self) -> None:
         appointments = self._appointment_service.get_upcoming_unreminded()
@@ -203,11 +214,11 @@ class ReminderService:
             for appt in today_appts:
                 text += f"  • {appt.time} — {appt.client_name} ({appt.phone})\n"
 
-            for admin_id in self._admin_ids:
-                try:
-                    await self._notification_service.notify_admins_list(text)
-                except Exception as exc:
-                    logger.warning("Failed to send digest to admin %s: %s", admin_id, exc)
+            # FIXED: удалён внешний цикл по admin_ids (notify_admins_list уже итерирует)
+            try:
+                await self._notification_service.notify_admins_list(text)
+            except Exception as exc:
+                logger.warning("Failed to send digest: %s", exc)
         except Exception:
             logger.exception("Daily digest job failed")
 

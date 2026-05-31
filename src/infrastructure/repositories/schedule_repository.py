@@ -449,10 +449,13 @@ class ScheduleRepository(BaseRepository):
             conn.execute("DELETE FROM workday_templates WHERE id = ?", (template_id,))
 
     def get_workday_template(self, template_id: int) -> dict | None:
-        """Возвращает конкретный шаблон."""
+        """Возвращает конкретный шаблон.
+        
+        FIXED: используется правильное имя колонки `slots` вместо `schedule`.
+        """
         with self._db.read_connection() as conn:
             row = conn.execute(
-                "SELECT id, name, schedule FROM workday_templates WHERE id = ?",
+                "SELECT id, name, slots FROM workday_templates WHERE id = ?",
                 (template_id,),
             ).fetchone()
         return dict(row) if row else None

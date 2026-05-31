@@ -440,14 +440,16 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await callback.answer("Рассылка запущена...")
         import asyncio
         try:
-            appts = await asyncio.to_thread(appt_service.get_all)
+            # FIXED: получаем только активные записи (не отменённые)
+            appts = await asyncio.to_thread(appt_service.get_all_active)
             user_ids = {a.user_id for a in appts}
             sent = 0
             for uid in user_ids:
                 try:
                     await callback.message.bot.send_message(uid, text, parse_mode="HTML")
                     sent += 1
-                    await asyncio.sleep(0.05)
+                    # FIXED: соблюдаем лимиты Telegram API (1 сообщение в секунду на пользователя)
+                    await asyncio.sleep(0.1)
                 except Exception:
                     logger.exception("Failed to send broadcast to %s", uid)
             await callback.message.edit_text(f"Рассылка завершена. Отправлено сообщений: {sent}")
@@ -586,10 +588,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         from datetime import datetime
         try:
             import asyncio
-            # Вставляем запись в таблицу blacklist
+            # Добавляем пользователя в чёрный список через сервис
             def _do_block():
-                with appt_service._appointment_repo._db.transaction() as conn:
-                    conn.execute("INSERT OR REPLACE INTO blacklist (user_id, reason, created_at) VALUES (?, ?, ?)", (user_id, reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                appt_service.block_user(user_id, reason)
             await asyncio.to_thread(_do_block)
             await message.answer(f"Пользователь {user_id} добавлен в черный список.")
         except Exception:
@@ -599,9 +600,32 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await state.clear()
 
     @router.callback_query(F.data == "admin_unblock_user")
-    async def admin_unblock_user(callback: CallbackQuery) -> None:
-        await callback.answer()
+    async def admin_unblock_user(callback: CallbackQuery, state: FSMContext) -> None:
+        """Инициирует процесс разблокировки пользователя."""
+        await state.set_state(AdminFSM.waiting_for_unblock_user_id)
         await callback.message.answer("Введите Telegram ID для разблокировки:")
+        await callback.answer()
+
+    @router.message(AdminFSM.waiting_for_unblock_user_id, F.text)
+    async def admin_unblock_user_confirm(message: Message, state: FSMContext) -> None:
+        """Разблокирует пользователя."""
+        try:
+            user_id = int(message.text.strip())
+        except ValueError:
+            await message.answer("❌ Пожалуйста, введите корректный Telegram ID (число).")
+            return
+
+        try:
+            import asyncio
+            def _do_unblock():
+                appt_service.unblock_user(user_id)
+            await asyncio.to_thread(_do_unblock)
+            await message.answer(f"✅ Пользователь {user_id} разблокирован.")
+        except Exception:
+            logger.exception("Failed to unblock user %s", user_id)
+            await message.answer(MessageFormatter.error_general())
+        finally:
+            await state.clear()
 
     # ── Админ: отмена всех записей на день (экстренная) ──────────────────
     @router.message(F.text == "🚫 Отменить все записи на дату")

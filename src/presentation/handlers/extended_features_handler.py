@@ -140,10 +140,8 @@ def setup_extended_features_router(container: Container) -> Router:
             return
 
         # Пытаемся забронировать новый слот и отменить старый
+        # FIXED: создаём новую ПЕРЕД отменой старой (оптимистичный перенос)
         try:
-            # Отменяем старую запись
-            await asyncio.to_thread(appt_service.cancel_by_id, old_appt_id)
-
             # Создаём новую запись с теми же данными
             from src.application.dto.booking_dto import CreateBookingDTO
 
@@ -159,6 +157,9 @@ def setup_extended_features_router(container: Container) -> Router:
             )
 
             result = await asyncio.to_thread(appt_service.create_booking, dto)
+            
+            # Только ПОСЛЕ успешного создания отменяем старую запись
+            await asyncio.to_thread(appt_service.cancel_by_id, old_appt_id)
 
             await callback.message.answer(
                 f"✅ <b>Запись перенесена успешно!</b>\n\n"
@@ -204,26 +205,8 @@ def setup_extended_features_router(container: Container) -> Router:
                 "ℹ️ Вы уже в списке ожидания на эту дату", show_alert=True
             )
 
-    # ── #17 Персональное приветствие с именем ──────────────────────────────
-    def get_personalized_greeting(user_id: int, first_name: str) -> str:
-        """Создаёт персональное приветствие на основе истории посещений."""
-        import asyncio
-
-        try:
-            last_appt = asyncio.run(
-                asyncio.to_thread(appt_service.get_last_appointment, user_id)
-            )
-            if last_appt:
-                return (
-                    f"👋 Добро пожаловать снова, <b>{last_appt.client_name}!</b>\n\n"
-                    f"Последняя запись была на <b>{last_appt.date}</b> в <b>{last_appt.time}</b>.\n"
-                    f"Хотите записаться ещё раз?"
-                )
-        except Exception:
-            pass
-
-        # Fallback
-        return f"👋 Добро пожаловать, <b>{first_name}</b>!\n\nЧто вы хотите сделать?"
+    # УДАЛЕНО: get_personalized_greeting — не используется, имеет ошибку asyncio.run() в async-контексте
+    # Персональное приветствие реализовано в common_handler.py
 
     # ═══════════════════════════════════════════════════════════════════════
     # АДМИНИСТРАТОРСКИЕ ФУНКЦИИ
