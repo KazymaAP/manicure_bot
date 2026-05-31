@@ -14,13 +14,17 @@ from datetime import datetime
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Update
+from aiogram.types import TelegramObject, Message, CallbackQuery
 
 logger = logging.getLogger(__name__)
 
 
 class LoggingMiddleware(BaseMiddleware):
     """Middleware для логирования входящих апдейтов и времени выполнения.
+
+    FIXED H-02: в aiogram 3.x event в middleware уже является конкретным типом
+    (Message, CallbackQuery и т.д.), а не Update. Используем isinstance() для
+    корректного извлечения user_id и from_user вместо проверки update.message / update.callback_query.
 
     FIXED: также сохраняет/обновляет запись о пользователе в таблице users,
     чтобы рассылка могла охватить всех взаимодействовавших с ботом.
@@ -34,20 +38,27 @@ class LoggingMiddleware(BaseMiddleware):
     ) -> Any:
         start_time = time.monotonic()
 
-        # event может быть различными объектами; используем TelegramObject для корректной типизации
-        update: TelegramObject = data.get("event_update", event)
+        # FIXED H-02: используем isinstance() вместо hasattr(update, "message") —
+        # в aiogram 3.x event уже является Message/CallbackQuery, а не Update.
+        # Проверка hasattr(update, "message") всегда False для Message (у него нет поля .message).
         update_type = "unknown"
         user_id = None
         from_user = None
 
-        if hasattr(update, "message") and update.message:
+        if isinstance(event, Message):
             update_type = "message"
-            from_user = update.message.from_user
+            from_user = event.from_user
             user_id = from_user.id if from_user else None
-        elif hasattr(update, "callback_query") and update.callback_query:
+        elif isinstance(event, CallbackQuery):
             update_type = "callback_query"
-            from_user = update.callback_query.from_user
+            from_user = event.from_user
             user_id = from_user.id if from_user else None
+        else:
+            # Для прочих типов (InlineQuery и т.д.) пробуем через from_user напрямую
+            from_user = getattr(event, "from_user", None)
+            if from_user:
+                user_id = getattr(from_user, "id", None)
+                update_type = type(event).__name__.lower()
 
         logger.debug("Processing %s from user_id=%s", update_type, user_id)
 

@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 # Максимальный размер словаря бакетов (защита от утечки памяти)
 _MAX_BUCKETS = 10_000
+# Интервал очистки устаревших бакетов (секунды)
+_CLEANUP_INTERVAL = 300  # 5 минут
 
 
 class RateLimitMiddleware(BaseMiddleware):
@@ -22,6 +24,8 @@ class RateLimitMiddleware(BaseMiddleware):
     FIXED: используем deque вместо list для O(1) операций pop из начала.
     FIXED: ограничен размер словаря бакетов (_MAX_BUCKETS) для защиты памяти.
     FIXED: убран asyncio.Lock на весь хэндлер — не нужен при deque + per-user scope.
+    FIXED H-01: добавлена периодическая очистка устаревших бакетов для предотвращения
+    утечки памяти при долгой работе бота.
     """
 
     def __init__(self, calls: int = 5, per_seconds: int = 5) -> None:
@@ -30,6 +34,8 @@ class RateLimitMiddleware(BaseMiddleware):
         self.per_seconds = per_seconds
         # FIXED: deque вместо list — O(1) удаление из начала
         self._buckets: dict[int, deque[float]] = defaultdict(deque)
+        # FIXED H-01: время последней очистки для периодической очистки устаревших бакетов
+        self._last_cleanup: float = time.time()
 
     async def __call__(self, handler, event: TelegramObject, data: dict[str, Any]):
         user_id = None
@@ -76,6 +82,19 @@ class RateLimitMiddleware(BaseMiddleware):
             return None
 
         bucket.append(now)
+
+        # FIXED H-01: периодическая очистка устаревших бакетов.
+        # Удаляем бакеты, в которых нет записей за последние per_seconds секунд.
+        # Это предотвращает бесконечный рост словаря при долгой работе бота
+        # (ранее пустые deque оставались в памяти навсегда после того, как пользователи замолкали).
+        if now - self._last_cleanup > _CLEANUP_INTERVAL:
+            cutoff = now - self.per_seconds
+            stale_keys = [uid for uid, bkt in self._buckets.items() if not bkt or bkt[-1] < cutoff]
+            for uid in stale_keys:
+                del self._buckets[uid]
+            self._last_cleanup = now
+            if stale_keys:
+                logger.debug("RateLimitMiddleware: cleaned up %d stale buckets", len(stale_keys))
 
         # FIXED: ограничиваем размер словаря бакетов для защиты от утечки памяти
         if len(self._buckets) > _MAX_BUCKETS:

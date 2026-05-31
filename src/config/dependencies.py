@@ -128,6 +128,8 @@ class Container:
             schedule_channel_id=self._settings.schedule_channel_id,
             appointment_repo=self._appointment_repo,
             service_name=service_name,
+            # FIXED M-06: передаём адрес студии из settings, чтобы он отображался в напоминаниях
+            address=self._settings.address or "",
         )
 
         # FIXED: создаём AppointmentService с callback для отправки уведомлений waitlist

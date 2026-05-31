@@ -281,8 +281,13 @@ class ScheduleService:
         return await asyncio.to_thread(self.get_nearest_free_slots, limit)
 
     async def join_waitlist(self, user_id: int, date: str) -> bool:
-        """Добавляет пользователя в лист ожидания (асинхронная оболочка)."""
-        return self._schedule_repo.join_waitlist(user_id, date)
+        """Добавляет пользователя в лист ожидания (асинхронная оболочка).
+
+        FIXED C-02: обёрнут синхронный SQLite-вызов в asyncio.to_thread,
+        чтобы не блокировать event loop на время выполнения транзакции.
+        """
+        import asyncio
+        return await asyncio.to_thread(self._schedule_repo.join_waitlist, user_id, date)
 
     # FIXED M-10: добавлен метод для вывода ближайших свободных слотов без открытия календаря и поддержка waitlist.
     async def get_all_working_dates(self) -> list[str]:
@@ -302,30 +307,50 @@ class ScheduleService:
         return await asyncio.to_thread(_sync)
 
     async def get_slots_for_date(self, date_str: str) -> list[TimeSlot]:
-        """Async-обёртка для get_all_slots."""
-        return self._schedule_repo.get_all_slots(date_str)
+        """Async-обёртка для get_all_slots.
+
+        FIXED C-03: обёрнут синхронный SQLite-вызов в asyncio.to_thread,
+        чтобы не блокировать event loop.
+        """
+        import asyncio
+        return await asyncio.to_thread(self._schedule_repo.get_all_slots, date_str)
 
     async def add_slot(self, date_str: str, time_str: str) -> bool:
-        """Async-обёртка для добавления слота (принимает строки напрямую)."""
+        """Async-обёртка для добавления слота (принимает строки напрямую).
+
+        FIXED: обёрнут синхронный SQLite-вызов в asyncio.to_thread.
+        """
+        import asyncio
         if not _TIME_RE.match(time_str):
             raise ValueError(f"Invalid time format: {time_str!r}, expected HH:MM")
         h, m = map(int, time_str.split(":"))
         if not (0 <= h < 24 and 0 <= m < 60):
             raise ValueError(f"Time out of range: {time_str!r}")
-        return self._schedule_repo.add_time_slot(date_str, time_str)
+        return await asyncio.to_thread(self._schedule_repo.add_time_slot, date_str, time_str)
 
     async def remove_slot(self, date_str: str, time_str: str) -> bool:
-        """Async-обёртка для delete_slot."""
-        return self._schedule_repo.delete_time_slot(date_str, time_str)
+        """Async-обёртка для delete_slot.
+
+        FIXED: обёрнут синхронный SQLite-вызов в asyncio.to_thread.
+        """
+        import asyncio
+        return await asyncio.to_thread(self._schedule_repo.delete_time_slot, date_str, time_str)
 
     async def toggle_working_day(self, date_str: str) -> bool:
-        """Переключает статус дня. Возвращает True если день теперь открыт."""
-        day = self._schedule_repo.get_working_day(date_str)
-        if not day:
-            # Создаём день, если не существует
-            self._schedule_repo.add_working_day(date_str, [])
-            self._schedule_repo.set_day_status(date_str, is_closed=False)
-            return True
-        new_status = not day.is_open
-        self._schedule_repo.set_day_status(date_str, is_closed=not new_status)
-        return new_status
+        """Переключает статус дня. Возвращает True если день теперь открыт.
+
+        FIXED: синхронные SQL-вызовы обёрнуты в asyncio.to_thread.
+        """
+        import asyncio
+
+        def _toggle():
+            day = self._schedule_repo.get_working_day(date_str)
+            if not day:
+                self._schedule_repo.add_working_day(date_str, [])
+                self._schedule_repo.set_day_status(date_str, is_closed=False)
+                return True
+            new_status = not day.is_open
+            self._schedule_repo.set_day_status(date_str, is_closed=not new_status)
+            return new_status
+
+        return await asyncio.to_thread(_toggle)

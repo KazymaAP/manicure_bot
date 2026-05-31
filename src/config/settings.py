@@ -62,10 +62,45 @@ class Settings(BaseSettings):
     )
 
     # ─── Услуги (название -> {duration: minutes, price: int})
-    services: dict = Field(
+    # FIXED M-08: тип dict[str, dict] вместо dict для базовой валидации структуры.
+    # Это не полная проверка вложенных ключей, но предотвращает полностью некорректные значения.
+    services: dict[str, dict] = Field(
         default_factory=dict,
         description="Словарь услуг с длительностью и ценой, например {'маникюр': {'duration': 60, 'price': 1200}}",
     )
+
+    @field_validator("services", mode="before")
+    @classmethod
+    def validate_services(cls, v: dict) -> dict:
+        """Проверяет структуру словаря услуг.
+
+        FIXED M-08: добавлена валидация структуры поля services.
+        Каждая услуга должна быть словарём; ключи могут содержать 'duration' и 'price'.
+        """
+        if not isinstance(v, dict):
+            raise ValueError(f"services must be a dict, got {type(v).__name__!r}")
+        for name, info in v.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"Service name must be a non-empty string, got {name!r}")
+            if not isinstance(info, dict):
+                raise ValueError(
+                    f"Service {name!r} value must be a dict with optional 'duration' and 'price' keys, got {type(info).__name__!r}"
+                )
+            if "duration" in info:
+                try:
+                    dur = int(info["duration"])
+                    if dur < 0:
+                        raise ValueError(f"Service {name!r} duration must be >= 0, got {dur}")
+                except (TypeError, ValueError) as e:
+                    raise ValueError(f"Service {name!r} duration is invalid: {e}") from e
+            if "price" in info:
+                try:
+                    price = int(info["price"])
+                    if price < 0:
+                        raise ValueError(f"Service {name!r} price must be >= 0, got {price}")
+                except (TypeError, ValueError) as e:
+                    raise ValueError(f"Service {name!r} price is invalid: {e}") from e
+        return v
 
     # ─── Рабочие дни (1=Пн ... 7=Вс) по умолчанию
     work_days: list[int] = Field(

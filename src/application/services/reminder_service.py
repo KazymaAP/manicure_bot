@@ -338,12 +338,17 @@ class ReminderService:
             logger.exception("Daily digest job failed")
 
     async def _daily_backup_job(self) -> None:
-        """Создаёт ежедневный бэкап БД."""
+        """Создаёт ежедневный бэкап БД.
+
+        FIXED M-02: убран антипаттерн __import__("asyncio").
+        asyncio уже импортирован в начале модуля — используем его напрямую.
+        """
         try:
             if not self._backup_service:
                 logger.warning("BackupService not available")
                 return
-            backup_path = await __import__("asyncio").to_thread(self._backup_service.create_backup)
+            import asyncio
+            backup_path = await asyncio.to_thread(self._backup_service.create_backup)
             if backup_path:
                 logger.info("Daily backup completed: %s", backup_path)
         except Exception:

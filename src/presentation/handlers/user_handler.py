@@ -150,7 +150,11 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         await callback.answer()
 
     # ── Выбор даты ────────────────────────────────────────────────────────
-    @router.callback_query((BookingFSM.choosing_date | BookingFSM.choosing_service), F.data.startswith("cal_day:"))
+    # FIXED M-05: убран BookingFSM.choosing_service из фильтра.
+    # Ранее в состоянии choosing_service пользователь мог выбрать дату, минуя выбор услуги,
+    # что приводило к созданию записи без поля service.
+    # Теперь выбор даты доступен только после выбора услуги (состояние choosing_date).
+    @router.callback_query(BookingFSM.choosing_date, F.data.startswith("cal_day:"))
     async def choose_date(callback: CallbackQuery, state: FSMContext) -> None:
         _, date_str = callback.data.split(":", 1)
         slots = await sched_service.get_available_slots(date_str)

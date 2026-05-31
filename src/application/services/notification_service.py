@@ -34,9 +34,8 @@ class NotificationService:
         schedule_channel_id: int,
         appointment_repo: AppointmentRepository,
         service_name: str = "маникюр",
+        address: str | None = None,
     ) -> None:
-        # FIXED BUG-05: множество заблокировавших пользователей — исключаем из рассылки
-        self._blocked_users: set[int] = set()
         """Инициализирует сервис уведомлений.
 
         Args:
@@ -45,12 +44,18 @@ class NotificationService:
             schedule_channel_id: ID канала для публикации расписания.
             appointment_repo: Репозиторий записей.
             service_name: Название услуги для уведомлений.
+            address: Адрес студии (используется в напоминаниях).
         """
         self._bot = bot
         self._admin_ids = admin_ids
         self._schedule_channel_id = schedule_channel_id
         self._appointment_repo = appointment_repo
         self._service_name = service_name
+        # FIXED M-06: _address теперь корректно устанавливается из параметра конструктора,
+        # а не через getattr с пустым fallback. Адрес теперь отображается в напоминаниях.
+        self._address: str = address or ""
+        # FIXED H-03: убрано дублирование объявления _blocked_users (было объявлено дважды —
+        # до и после docstring). Оставляем одно объявление.
         # FIXED BUG-05: множество user_id, заблокировавших бота — исключаем из рассылок
         self._blocked_users: set[int] = set()
 
@@ -168,7 +173,8 @@ class NotificationService:
         appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         client_name = appt.client_name if appt else ""
         date = appt.date if appt else ""
-        address = getattr(self, "_address", "") or ""
+        # FIXED M-06: используем self._address, корректно заданный в __init__
+        address = self._address
         text = MessageFormatter.reminder_card(client_name=client_name, date=date, time=time, address=address)
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Приду", callback_data=f"reminder_yes:{appointment_id}"), InlineKeyboardButton(text="❌ Отменить", callback_data=f"reminder_no:{appointment_id}")]

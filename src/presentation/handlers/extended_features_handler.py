@@ -147,15 +147,25 @@ def setup_extended_features_router(container: Container) -> Router:
             await state.clear()
             return
 
-        # FIXED H-07: при переносе сначала отменяем старую запись, потом создаём новую.
+        # FIXED H-04 / H-07: при переносе сначала отменяем старую запись, потом создаём новую.
         # Прежний подход (создать новую → отменить старую) приводил к ошибке MaxAppointmentsReachedError
         # при max_per_user=1, т.к. старая запись ещё активна в момент создания новой.
+        # ДОПОЛНИТЕЛЬНОЕ ИСПРАВЛЕНИЕ: если создание новой записи не удалось (слот уже занят),
+        # мы пытаемся восстановить старую запись — пересоздаём её через create_booking
+        # с оригинальной датой и временем. Это минимизирует риск потери записи клиентом.
+        old_appt_obj = await asyncio.to_thread(appt_service.get_appointment_by_id, old_appt_id)
+        if not old_appt_obj:
+            await callback.answer("❌ Исходная запись не найдена", show_alert=True)
+            await state.clear()
+            return
+
         try:
             # Шаг 1: отменяем старую запись ДО создания новой
             await asyncio.to_thread(appt_service.cancel_by_id, old_appt_id)
 
             # Шаг 2: создаём новую запись с теми же данными
             from src.application.dto.booking_dto import CreateBookingDTO
+            from src.domain.exceptions.appointment import SlotAlreadyBookedError
 
             dto = CreateBookingDTO(
                 user_id=callback.from_user.id,
@@ -168,7 +178,41 @@ def setup_extended_features_router(container: Container) -> Router:
                 service=data.get("service", ""),
             )
 
-            result = await asyncio.to_thread(appt_service.create_booking, dto)
+            try:
+                result = await asyncio.to_thread(appt_service.create_booking, dto)
+            except SlotAlreadyBookedError:
+                # Шаг 2 провалился — слот уже занят. Пытаемся восстановить старую запись.
+                logger.warning(
+                    "Transfer failed: new slot %s %s is taken, trying to restore old appointment for user %s",
+                    new_date, time_str, callback.from_user.id,
+                )
+                try:
+                    restore_dto = CreateBookingDTO(
+                        user_id=callback.from_user.id,
+                        username=callback.from_user.username,
+                        client_name=data.get("client_name", ""),
+                        phone=data.get("phone", ""),
+                        date=old_appt_obj.date,
+                        time=old_appt_obj.time,
+                        comment=data.get("comment", ""),
+                        service=data.get("service", ""),
+                    )
+                    await asyncio.to_thread(appt_service.create_booking, restore_dto)
+                    await callback.message.answer(
+                        f"⚠️ <b>Не удалось перенести запись</b>\n\n"
+                        f"Выбранный слот <b>{new_date} {time_str}</b> уже занят.\n"
+                        f"Ваша прежняя запись на <b>{old_appt_obj.date} {old_appt_obj.time}</b> сохранена.",
+                        reply_markup=MainMenuKeyboard.main(),
+                    )
+                except Exception as restore_exc:
+                    logger.error("Failed to restore old appointment: %s", restore_exc)
+                    await callback.message.answer(
+                        f"❌ <b>Критическая ошибка переноса</b>\n\n"
+                        f"Выбранный слот занят, а восстановить прежнюю запись не удалось.\n"
+                        f"Пожалуйста, свяжитесь с администратором.",
+                    )
+                await state.clear()
+                return
 
             await callback.message.answer(
                 f"✅ <b>Запись перенесена успешно!</b>\n\n"
