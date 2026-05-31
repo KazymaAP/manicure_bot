@@ -141,18 +141,22 @@ class ReminderService:
 
     def cancel_reminder(self, appointment_id: int) -> None:
         """Отменяет все напоминания для записи (все суффиксы часов).
-        
-        FIXED: отменяет напоминания со ВСЕМИ суффиксами {24, 2, 1}, а не только базовый ID.
+
+        FIXED MED-01: использует {int(self._hours_before), 2, 1} вместо захардкоженного {24, 2, 1}.
+        Ранее при REMINDER_HOURS_BEFORE=48 напоминание планировалось с ID reminder_48_*,
+        но при отмене искался reminder_24_* — напоминание не отменялось и приходило клиенту
+        на уже отменённую запись. Теперь отменяем точно те же часы, что были запланированы.
         """
         cancelled = False
-        # Перебираем все возможные часы для напоминаний
-        for hrs in {24, 2, 1}:
+        # FIXED MED-01: используем self._hours_before вместо хардкода 24
+        hours_to_cancel = {int(self._hours_before), 2, 1}
+        for hrs in hours_to_cancel:
             job_id = f"{_JOB_PREFIX}{appointment_id}_{hrs}"
             if self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
                 cancelled = True
                 logger.info("Reminder (%dh) cancelled for appointment #%s", hrs, appointment_id)
-        
+
         if not cancelled:
             logger.warning("No reminders found for appointment #%s", appointment_id)
 

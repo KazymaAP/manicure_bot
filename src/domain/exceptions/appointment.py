@@ -1,5 +1,8 @@
 """
 src/domain/exceptions/appointment.py — Исключения для записей.
+
+FIXED BUG-06: добавлено исключение AppointmentAlreadyCancelledError — семантически
+  правильно отделяет "запись не найдена" от "запись уже отменена".
 """
 from src.domain.exceptions.base import DomainError
 
@@ -7,6 +10,18 @@ from src.domain.exceptions.base import DomainError
 class AppointmentNotFoundError(DomainError):
     def __init__(self, appointment_id: int) -> None:
         super().__init__(f"Appointment #{appointment_id} not found")
+        self.appointment_id = appointment_id
+
+
+class AppointmentAlreadyCancelledError(DomainError):
+    """FIXED BUG-06: Запись существует, но уже была отменена.
+
+    Семантически отличается от AppointmentNotFoundError — запись найдена в БД,
+    просто уже имеет статус CANCELLED. Вызывающий код может показать корректное
+    сообщение пользователю: "Запись уже отменена" вместо "Запись не найдена".
+    """
+    def __init__(self, appointment_id: int) -> None:
+        super().__init__(f"Appointment #{appointment_id} is already cancelled")
         self.appointment_id = appointment_id
 
 

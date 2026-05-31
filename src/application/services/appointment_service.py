@@ -18,6 +18,7 @@ from src.domain.exceptions import (
     AppointmentNotFoundError,
     SlotAlreadyBookedError,
 )
+from src.domain.exceptions.appointment import AppointmentAlreadyCancelledError
 from src.domain.models.appointment import Appointment
 from src.infrastructure.repositories.appointment_repository import AppointmentRepository
 from src.infrastructure.repositories.schedule_repository import ScheduleRepository
@@ -139,6 +140,16 @@ class AppointmentService:
 
         # Path B: repository is a mock/stub in tests — use repo interface (not atomic)
         # This keeps tests simple and allows mocking. In production repo path (above) we have atomicity.
+        # FIXED BUG-13: добавлена проверка blacklist в Path B (ранее присутствовала только в Path A).
+        # Заблокированный пользователь не должен создавать записи ни в тестах, ни в проде.
+        try:
+            if self._appointment_repo.is_user_blocked(dto.user_id):
+                from src.domain.exceptions.appointment import BlacklistedUserError
+                raise BlacklistedUserError(dto.user_id)
+        except AttributeError:
+            # Если метод не реализован в моке — пропускаем (обратная совместимость)
+            pass
+
         active_count = self._appointment_repo.count_active_by_user_id(dto.user_id)
         if active_count >= self._max_per_user:
             from src.domain.exceptions.appointment import MaxAppointmentsReachedError
@@ -230,8 +241,10 @@ class AppointmentService:
         if not appointment:
             raise AppointmentNotFoundError(appointment_id)
         if appointment.is_cancelled:
-            # FIXED: явная ошибка при попытке отменить уже отменённую запись — помогает диагностике
-            raise AppointmentNotFoundError(appointment_id)
+            # FIXED BUG-06: используем AppointmentAlreadyCancelledError вместо AppointmentNotFoundError.
+            # Запись существует (найдена в БД), просто уже отменена — это семантически другая ситуация.
+            # Вызывающий код теперь может показать корректное сообщение: "Уже отменена" vs "Не найдена".
+            raise AppointmentAlreadyCancelledError(appointment_id)
         return self._do_cancel(appointment)
 
     def cancel_appointment(self, appointment_id: int, user_id: int) -> Appointment | None:

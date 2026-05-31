@@ -133,7 +133,10 @@ def setup_extended_features_router(container: Container) -> Router:
         """Подтверждение нового слота и завершение переноса."""
         import asyncio
 
-        time_str = callback.data.split(":")[1]
+        # FIXED BUG-04: split(":", 1)[1] вместо split(":")[1].
+        # callback_data имеет вид "time:10:00" — двоеточие присутствует в самом времени.
+        # Старый split(":")[1] возвращал только "10" вместо "10:00".
+        time_str = callback.data.split(":", 1)[1]
         data = await state.get_data()
 
         new_date = data.get("transfer_new_date")
@@ -393,6 +396,109 @@ def setup_extended_features_router(container: Container) -> Router:
             await message.answer("❌ Ошибка при сохранении шаблона")
 
         await state.clear()
+
+    # ── BUG-15: Хендлеры для admin_delete_template и admin_apply_template ──
+    # FIXED BUG-15: ранее кнопки "Удалить шаблон" и "Применить шаблон" генерировались в
+    # AdminKeyboard.templates_menu(), но хендлеры для них отсутствовали. Нажатие кнопки
+    # приводило к зависанию UI. Теперь хендлеры реализованы.
+
+    @router.callback_query(F.data == "admin_delete_template")
+    async def admin_delete_template_start(callback: CallbackQuery, state: FSMContext) -> None:
+        """Начинает удаление шаблона расписания."""
+        import asyncio
+
+        try:
+            templates = await asyncio.to_thread(lambda: sched_service.get_workday_templates())
+        except Exception:
+            templates = []
+
+        if not templates:
+            await callback.answer("ℹ️ Нет сохранённых шаблонов для удаления", show_alert=True)
+            return
+
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        buttons = []
+        for tmpl in templates:
+            buttons.append([InlineKeyboardButton(
+                text=f"🗑 {tmpl['name']}",
+                callback_data=f"admin_del_tmpl_confirm:{tmpl['id']}"
+            )])
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_templates")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await callback.message.edit_text(
+            "🗑 <b>Выберите шаблон для удаления:</b>",
+            reply_markup=kb
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin_del_tmpl_confirm:"))
+    async def admin_delete_template_execute(callback: CallbackQuery) -> None:
+        """Выполняет удаление шаблона по ID."""
+        import asyncio
+
+        try:
+            tmpl_id = int(callback.data.split(":")[1])
+        except (ValueError, IndexError):
+            await callback.answer("❌ Некорректный ID шаблона", show_alert=True)
+            return
+
+        try:
+            await asyncio.to_thread(lambda: sched_service._schedule_repo.delete_workday_template(tmpl_id))
+            await callback.answer("✅ Шаблон удалён", show_alert=True)
+            await callback.message.edit_text("✅ <b>Шаблон успешно удалён</b>")
+        except Exception as exc:
+            logger.error("Template delete error: %s", exc)
+            await callback.answer("❌ Ошибка при удалении шаблона", show_alert=True)
+
+    @router.callback_query(F.data == "admin_apply_template")
+    async def admin_apply_template_start(callback: CallbackQuery, state: FSMContext) -> None:
+        """Показывает список шаблонов для применения к расписанию."""
+        import asyncio
+
+        try:
+            templates = await asyncio.to_thread(lambda: sched_service.get_workday_templates())
+        except Exception:
+            templates = []
+
+        if not templates:
+            await callback.answer("ℹ️ Нет сохранённых шаблонов для применения", show_alert=True)
+            return
+
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        buttons = []
+        for tmpl in templates:
+            slots_preview = tmpl.get('slots', '')[:30]
+            buttons.append([InlineKeyboardButton(
+                text=f"📋 {tmpl['name']} ({slots_preview}…)",
+                callback_data=f"admin_apply_tmpl_exec:{tmpl['id']}"
+            )])
+        buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_templates")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await callback.message.edit_text(
+            "📋 <b>Выберите шаблон для применения:</b>\n\n"
+            "После выбора введите дату начала применения шаблона.",
+            reply_markup=kb
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin_apply_tmpl_exec:"))
+    async def admin_apply_template_choose_date(callback: CallbackQuery, state: FSMContext) -> None:
+        """Запрашивает дату для применения шаблона."""
+        try:
+            tmpl_id = int(callback.data.split(":")[1])
+        except (ValueError, IndexError):
+            await callback.answer("❌ Некорректный ID шаблона", show_alert=True)
+            return
+
+        await state.update_data(apply_template_id=tmpl_id)
+        await state.set_state(AdminFSM.waiting_for_date)
+        await callback.message.answer(
+            "📅 Введите <b>дату</b> для применения шаблона (формат: YYYY-MM-DD):\n"
+            "Пример: 2025-06-15"
+        )
+        await callback.answer()
 
     # ── #43 Кнопка «Отменить все записи» на дату ──────────────────────────
     # FIXED: убран фильтр AdminFSM.main_menu

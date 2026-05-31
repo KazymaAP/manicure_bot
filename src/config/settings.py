@@ -189,15 +189,39 @@ class Settings(BaseSettings):
 
     @property
     def admin_ids(self) -> list[int]:
-        """Преобразует строку admin_ids_raw в список целых чисел."""
+        """Преобразует строку admin_ids_raw в список целых чисел.
+
+        FIXED BUG-14: логирует WARNING если ADMIN_IDS не настроены, чтобы диагностика
+        была очевидной. Ранее пустой список возвращался молча — никакого предупреждения.
+        """
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
+
         if not self.admin_ids_raw:
+            _logger.warning(
+                "⚠️ ADMIN_IDS не настроены! Доступ к администрированию невозможен. "
+                "Установите ADMIN_IDS=ваш_telegram_id в .env файле."
+            )
             return []
         raw_lower = self.admin_ids_raw.strip().lower()
         if raw_lower in ("your_telegram_id_here", "your_telegram_id"):
+            _logger.warning(
+                "⚠️ ADMIN_IDS содержит placeholder '%s'! "
+                "Замените на ваш реальный Telegram ID. Доступ к администрированию отключён.",
+                self.admin_ids_raw.strip()
+            )
             return []
         try:
-            return [int(id_str.strip()) for id_str in self.admin_ids_raw.split(",") if id_str.strip().isdigit()]
+            ids = [int(id_str.strip()) for id_str in self.admin_ids_raw.split(",") if id_str.strip().isdigit()]
+            if not ids:
+                _logger.warning(
+                    "⚠️ ADMIN_IDS='%s' не содержит корректных числовых ID! "
+                    "Доступ к администрированию невозможен.",
+                    self.admin_ids_raw
+                )
+            return ids
         except ValueError:
+            _logger.warning("⚠️ Ошибка парсинга ADMIN_IDS='%s'. Доступ к администрированию отключён.", self.admin_ids_raw)
             return []
 
 

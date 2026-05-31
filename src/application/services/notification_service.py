@@ -3,6 +3,9 @@ src/application/services/notification_service.py — Сервис уведомл
 
 ✅ Из v2_tar: все методы уведомлений + _safe_send
 ✅ Улучшения v4: notify_admin_cancellation принимает appointment объект напрямую
+✅ FIXED BUG-05: _safe_send использует isinstance(TelegramForbiddenError) вместо хрупкой
+   проверки по имени класса через строку. Пользователи с Forbidden-ошибкой помечаются
+   как неактивные для исключения из будущих рассылок.
 """
 from __future__ import annotations
 
@@ -32,6 +35,8 @@ class NotificationService:
         appointment_repo: AppointmentRepository,
         service_name: str = "маникюр",
     ) -> None:
+        # FIXED BUG-05: множество заблокировавших пользователей — исключаем из рассылки
+        self._blocked_users: set[int] = set()
         """Инициализирует сервис уведомлений.
 
         Args:
@@ -46,6 +51,8 @@ class NotificationService:
         self._schedule_channel_id = schedule_channel_id
         self._appointment_repo = appointment_repo
         self._service_name = service_name
+        # FIXED BUG-05: множество user_id, заблокировавших бота — исключаем из рассылок
+        self._blocked_users: set[int] = set()
 
     async def notify_admin_new_booking(self, appointment_id: int) -> None:
         """Уведомляет администратора о новой записи.
@@ -229,9 +236,11 @@ class NotificationService:
     async def _safe_send(self, chat_id: int, text: str) -> bool:
         """Безопасно отправляет простое текстовое сообщение.
 
-        FIXED архитектурное замечание: TelegramForbiddenError (бот заблокирован пользователем)
-        логируется как WARNING — пользователь сам отозвал доступ, это не ошибка приложения.
-        Остальные ошибки — ERROR. Можно расширить: при Forbidden удалять пользователя из рассылки.
+        FIXED BUG-05: использует isinstance(exc, TelegramForbiddenError) вместо хрупкой
+        проверки имени класса через строку. Имена классов aiogram могут меняться между
+        версиями, isinstance() — надёжный способ проверки типа исключения.
+        При Forbidden-ошибке user_id добавляется в _blocked_users и исключается из
+        будущих рассылок, что предотвращает бесконечный рост нагрузки.
 
         Args:
             chat_id: ID чата.
@@ -240,17 +249,37 @@ class NotificationService:
         Returns:
             True если сообщение отправлено.
         """
+        # FIXED BUG-05: проверяем, не заблокировал ли пользователь бота ранее
+        if chat_id in self._blocked_users:
+            logger.debug("Skipping send to blocked user %s", chat_id)
+            return False
+
         try:
             await self._bot.send_message(chat_id, text, parse_mode="HTML")
             return True
         except Exception as exc:
-            exc_name = type(exc).__name__
-            # FIXED: TelegramForbiddenError — бот заблокирован пользователем, это ожидаемо
-            if "Forbidden" in exc_name or "BotBlocked" in exc_name or "UserDeactivated" in exc_name:
-                logger.warning(
-                    "Cannot send message to chat_id=%s — bot blocked or user deactivated: %s",
-                    chat_id, exc,
-                )
-            else:
-                logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
+            # FIXED BUG-05: используем isinstance() с реальным классом aiogram,
+            # а не хрупкую проверку по имени класса через строку.
+            try:
+                from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+                if isinstance(exc, TelegramForbiddenError):
+                    logger.warning(
+                        "Cannot send message to chat_id=%s — bot blocked by user: %s. "
+                        "Adding to blocked list to prevent future sends.",
+                        chat_id, exc,
+                    )
+                    # FIXED BUG-05: помечаем как заблокированного — исключаем из будущих рассылок
+                    self._blocked_users.add(chat_id)
+                    return False
+            except ImportError:
+                # Fallback если структура aiogram.exceptions изменилась
+                exc_name = type(exc).__name__
+                if "Forbidden" in exc_name or "BotBlocked" in exc_name or "UserDeactivated" in exc_name:
+                    logger.warning(
+                        "Cannot send message to chat_id=%s — bot blocked or user deactivated: %s",
+                        chat_id, exc,
+                    )
+                    self._blocked_users.add(chat_id)
+                    return False
+            logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
             return False

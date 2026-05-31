@@ -25,18 +25,44 @@ async def main() -> None:
     logger = logging.getLogger(__name__)
     logger.info("Запуск бота (v4)…")
 
+    # FIXED BUG-14: явная проверка наличия администраторов при запуске
+    if not settings.admin_ids:
+        logger.warning(
+            "⚠️ КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ: ADMIN_IDS не настроены или содержат placeholder! "
+            "Ни один пользователь не имеет доступа к admin-панели (/admin). "
+            "Установите ADMIN_IDS=ваш_telegram_id в .env"
+        )
+
     # ── Хранилище FSM ─────────────────────────────────────────────────────
+    # FIXED BUG-11: При отсутствии Redis используем MemoryStorage с предупреждением.
+    # В production MemoryStorage НЕ рекомендуется — при перезапуске бота все
+    # FSM-состояния пользователей теряются (пользователи в процессе записи получают
+    # «зависший» диалог). Для production установите REDIS_URL в .env.
     if settings.redis_url:
         try:
             from aiogram.fsm.storage.redis import RedisStorage
-            storage = RedisStorage.from_url(settings.redis_url)
-            logger.info("FSM Storage: Redis (%s)", settings.redis_url)
+            storage = RedisStorage.from_url(
+                settings.redis_url,
+                state_ttl=3600,   # FIXED BUG-11: TTL 1 час для FSM-состояний
+                data_ttl=86400,   # FIXED BUG-11: TTL 24 часа для FSM-данных
+            )
+            logger.info("FSM Storage: Redis (%s) с TTL state=1h, data=24h", settings.redis_url)
         except ImportError:
-            logger.warning("redis пакет не установлен, используем MemoryStorage")
+            logger.warning(
+                "redis пакет не установлен, используем MemoryStorage. "
+                "⚠️ ВНИМАНИЕ: В production используйте Redis (REDIS_URL в .env)!"
+            )
+            storage = MemoryStorage()
+        except Exception as exc:
+            logger.warning("Ошибка подключения к Redis (%s): %s. Используем MemoryStorage.", settings.redis_url, exc)
             storage = MemoryStorage()
     else:
         storage = MemoryStorage()
-        logger.info("FSM Storage: Memory")
+        # FIXED BUG-11: явное предупреждение в логах о production-ограничении MemoryStorage
+        logger.warning(
+            "FSM Storage: MemoryStorage. ⚠️ ВНИМАНИЕ: Состояния теряются при перезапуске! "
+            "Для production установите REDIS_URL в .env файле."
+        )
 
     # ── Бот и диспетчер ───────────────────────────────────────────────────
     bot = Bot(
@@ -79,15 +105,17 @@ async def main() -> None:
     reminder_service = container.reminder_service
     reminder_service.start()
     reminder_service.restore_reminders()
-    # FIXED: планируем ежедневный дайджест, бэкап, архив и проверку слотов
+    # FIXED BUG-03: регистрируем задачи ТОЛЬКО в одном месте (в ReminderService).
+    # Ранее archive и insufficient_slots регистрировались ДВАЖДЫ:
+    #   1) через reminder_service.schedule_weekly_archive() / schedule_insufficient_slots_check()
+    #   2) через final_router.register_scheduled_jobs() с ДРУГИМИ функциями и ID.
+    # Итог: оба набора выполнялись параллельно. Теперь — единственный источник задач.
+    # final_router.register_scheduled_jobs() УДАЛЁН — его задачи продублированы в ReminderService.
     reminder_service.schedule_daily_digest(hour=9, minute=0)   # 9:00 UTC
     reminder_service.schedule_daily_backup(hour=2, minute=0)   # 2:00 UTC
     reminder_service.schedule_weekly_archive(hour=3, minute=0) # Вс 3:00 UTC
     reminder_service.schedule_insufficient_slots_check(hour=10, minute=0)  # 10:00 UTC
-    # FIXED L-02: регистрируем задачи из final_features_handler (archive + insufficient_slots)
-    register_fn = getattr(final_router, "register_scheduled_jobs", None)
-    if register_fn:
-        register_fn(reminder_service._scheduler)
+    # NOTE: final_router.register_scheduled_jobs() НЕ вызывается — задачи уже зарегистрированы выше.
     logger.info("Планировщик напоминаний запущен")
 
     # ── Health Server (для мониторинга) ────────────────────────────────────

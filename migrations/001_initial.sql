@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS appointments (
 CREATE INDEX IF NOT EXISTS idx_appointments_user_id ON appointments(user_id);
 CREATE INDEX IF NOT EXISTS idx_appointments_date    ON appointments(date);
 CREATE INDEX IF NOT EXISTS idx_appointments_active  ON appointments(user_id, is_cancelled);
+-- FIXED MED-08: добавлен индекс idx_appointments_date_active (присутствует в initialize_schema, отсутствовал в миграции)
+CREATE INDEX IF NOT EXISTS idx_appointments_date_active ON appointments(date, is_cancelled);
 
 -- ── Чёрный список (блокировка пользователей) ──────────────────────────────
 -- FIXED BUG 5: схема приведена к единому виду с connection.py (user_id INTEGER PRIMARY KEY)
@@ -93,13 +95,18 @@ CREATE TABLE IF NOT EXISTS backups (
 
 -- ── Пользователи ────────────────────────────────────────────────────────────
 -- FIXED: таблица всех пользователей для рассылки и статистики
+-- FIXED BUG-09: добавлены колонки управления уведомлениями (синхронизировано с connection.py)
 CREATE TABLE IF NOT EXISTS users (
-    user_id    INTEGER PRIMARY KEY,
-    username   TEXT,
-    first_name TEXT,
-    last_name  TEXT,
-    created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    user_id                INTEGER PRIMARY KEY,
+    username               TEXT,
+    first_name             TEXT,
+    last_name              TEXT,
+    created_at             TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen              TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notifications_enabled  INTEGER NOT NULL DEFAULT 1,
+    notif_24h              INTEGER NOT NULL DEFAULT 1,
+    notif_2h               INTEGER NOT NULL DEFAULT 1,
+    notif_1h               INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);

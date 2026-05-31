@@ -5,6 +5,8 @@ src/infrastructure/database/connection.py — Управление соедин�
 ✅ Улучшения v4: connection pool (check_same_thread=False), PRAGMA synchronous,
    лучшая обработка ошибок, метод execute_script
 ✅ Улучшения v5: per-thread connection reuse, thread-local storage
+✅ FIXED BUG-07: WAL-режим устанавливается в get_connection() для каждого нового соединения
+✅ FIXED BUG-01: reset() корректно закрывает ВСЕ зарегистрированные соединения
 """
 from __future__ import annotations
 
@@ -64,19 +66,37 @@ class DatabaseManager:
 
     @classmethod
     def reset(cls) -> None:
-        """Сбрасывает Singleton для тестов и закрывает текущее thread-local соединение.
+        """Сбрасывает Singleton для тестов — закрывает ВСЕ зарегистрированные соединения.
 
-        FIXED: потокобезопасный reset с блокировкой и правильным закрытием соединения текущего потока.
+        FIXED BUG-01: потокобезопасный reset с блокировкой. Закрывает все соединения из
+        реестра _connections (не только текущего потока), что важно для корректной очистки
+        в тестах между тест-кейсами. Вызывайте в teardown каждого теста.
         """
         with cls._lock:
-            # Закрываем текущный поток-локал соединение безопасно
             try:
-                if hasattr(cls._thread_local, 'conn') and cls._thread_local.conn:
-                    try:
-                        cls._thread_local.conn.close()
-                    except Exception:
-                        pass
-                    cls._thread_local.conn = None
+                # Закрываем все зарегистрированные соединения (не только текущего потока)
+                instance = cls._instance
+                if instance is not None:
+                    connections_lock = getattr(instance, '_connections_lock', None)
+                    connections = getattr(instance, '_connections', {})
+                    if connections_lock:
+                        with connections_lock:
+                            for tid, conn in list(connections.items()):
+                                try:
+                                    conn.close()
+                                except Exception:
+                                    pass
+                            connections.clear()
+                # Очищаем thread-local соединение текущего потока
+                try:
+                    if hasattr(cls._thread_local, 'conn') and cls._thread_local.conn:
+                        try:
+                            cls._thread_local.conn.close()
+                        except Exception:
+                            pass
+                        cls._thread_local.conn = None
+                except Exception:
+                    pass
             finally:
                 cls._instance = None
                 cls._initialized = False
@@ -106,6 +126,10 @@ class DatabaseManager:
         if not hasattr(self._thread_local, 'conn') or self._thread_local.conn is None:
             conn = sqlite3.connect(self._db_path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
+            # FIXED BUG-07: WAL-режим устанавливается для каждого нового соединения,
+            # а не только в initialize_schema(). SQLite WAL глобален для файла, но
+            # явная установка в каждом потоке — надёжная практика.
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA cache_size=-8000")
@@ -248,13 +272,18 @@ class DatabaseManager:
 
             -- FIXED: таблица всех пользователей, взаимодействовавших с ботом
             -- Используется для рассылки всем пользователям, а не только с активными записями
+            -- FIXED BUG-09: добавлена колонка notifications_enabled для управления уведомлениями
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
                 last_name TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                notifications_enabled INTEGER NOT NULL DEFAULT 1,
+                notif_24h INTEGER NOT NULL DEFAULT 1,
+                notif_2h INTEGER NOT NULL DEFAULT 1,
+                notif_1h INTEGER NOT NULL DEFAULT 1
             );
         """
         # FIXED H-06: executescript() вызывается НАПРЯМУЮ (не внутри transaction()),
@@ -271,6 +300,21 @@ class DatabaseManager:
                     logger.info("Added missing column 'service' to appointments table for backward compatibility.")
         except Exception:
             logger.exception("Failed to ensure 'service' column exists; continuing.")
+        # FIXED BUG-09: добавляем колонки уведомлений в таблицу users для обратной совместимости
+        try:
+            with self.transaction() as conn2:
+                user_cols = [r[1] for r in conn2.execute("PRAGMA table_info('users')").fetchall()]
+                for col_name, col_def in [
+                    ("notifications_enabled", "INTEGER NOT NULL DEFAULT 1"),
+                    ("notif_24h", "INTEGER NOT NULL DEFAULT 1"),
+                    ("notif_2h", "INTEGER NOT NULL DEFAULT 1"),
+                    ("notif_1h", "INTEGER NOT NULL DEFAULT 1"),
+                ]:
+                    if col_name not in user_cols:
+                        conn2.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                        logger.info("Added missing column '%s' to users table.", col_name)
+        except Exception:
+            logger.exception("Failed to ensure notification columns in users table; continuing.")
         logger.info("Database schema initialized successfully.")
 
     async def close(self) -> None:

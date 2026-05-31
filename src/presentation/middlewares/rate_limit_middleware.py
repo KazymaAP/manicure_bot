@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject
+from aiogram.types import TelegramObject, Message, CallbackQuery
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +34,20 @@ class RateLimitMiddleware(BaseMiddleware):
     async def __call__(self, handler, event: TelegramObject, data: dict[str, Any]):
         user_id = None
         try:
-            # пытаемся извлечь user_id из известных мест
-            update = data.get("event_update", event)
-            if hasattr(update, "message") and getattr(update, "message") is not None:
-                user_id = getattr(update.message.from_user, "id", None)
-            elif hasattr(update, "callback_query") and getattr(update, "callback_query") is not None:
-                user_id = getattr(update.callback_query.from_user, "id", None)
+            # FIXED BUG-08: в aiogram 3.x event в middleware уже является конкретным типом
+            # (Message, CallbackQuery и т.д.), а не Update. Используем isinstance() для
+            # правильного извлечения user_id вместо неработающего update.message.from_user.id.
+            if isinstance(event, Message):
+                if event.from_user is not None:
+                    user_id = event.from_user.id
+            elif isinstance(event, CallbackQuery):
+                if event.from_user is not None:
+                    user_id = event.from_user.id
+            else:
+                # Для прочих типов (InlineQuery и т.д.) пробуем через from_user напрямую
+                from_user = getattr(event, "from_user", None)
+                if from_user is not None:
+                    user_id = getattr(from_user, "id", None)
         except Exception:
             user_id = None
 

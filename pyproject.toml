@@ -7,16 +7,28 @@ name = "manicure-bot"
 version = "4.0.0"
 description = "Telegram-бот для онлайн-записи на маникюр"
 requires-python = ">=3.10"
+# FIXED BUG-12: синхронизированы зависимости с requirements.txt.
+# Ранее отсутствовали aiohttp, tzdata, SQLAlchemy — критически важные пакеты.
+# mypy, pytest перенесены в [project.optional-dependencies] как dev-зависимости.
 dependencies = [
     "aiogram==3.13.1",
     "pydantic==2.9.2",
     "pydantic-settings==2.6.1",
-    "apscheduler==3.10.4",
+    "apscheduler[sqlalchemy]==3.10.4",
     "python-dotenv==1.0.1",
+    "SQLAlchemy==2.0.20",
+    "aiohttp==3.9.1",
+    "tzdata==2024.1",
 ]
 
 [project.optional-dependencies]
 redis = ["redis==5.2.0"]
+dev = [
+    "pytest==7.4.3",
+    "pytest-asyncio==0.23.2",
+    "mypy==1.7.1",
+    "types-aiohttp==3.9.2",
+]
 
 [tool.ruff]
 line-length = 100

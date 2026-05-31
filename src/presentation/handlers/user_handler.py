@@ -2,7 +2,7 @@
 """FSM-обработчики для записи клиента на маникюр."""
 
 import logging
-from datetime import date as _date
+from datetime import date as _date, datetime as _datetime  # FIXED MED-03: добавлен импорт datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -422,7 +422,8 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         lines = ["📅 <b>Ближайшие свободные слоты:</b>\n"]
         from src.presentation.constants import MONTHS_RU_GEN
         for date_str, time_str in slots:
-            d = __import__("datetime").datetime.strptime(date_str, "%Y-%m-%d")
+            # FIXED MED-03: убран антипаттерн __import__("datetime"). Используем уже импортированный _datetime.
+            d = _datetime.strptime(date_str, "%Y-%m-%d")
             formatted_date = f"{d.day} {MONTHS_RU_GEN[d.month]} {d.year}"
             lines.append(f"• {formatted_date} в {time_str}")
         await message.answer("\n".join(lines), parse_mode="HTML")
@@ -430,6 +431,10 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data.startswith("cancel_appt:"))
     async def cancel_appointment(callback: CallbackQuery) -> None:
         import asyncio
+        from src.domain.exceptions.appointment import (
+            AppointmentNotFoundError as _ApptNotFoundError,
+            AppointmentAlreadyCancelledError as _ApptAlreadyCancelledError,  # FIXED BUG-06
+        )
         appt_id = int(callback.data.split(":")[1])
         answered = False
         try:
@@ -442,6 +447,15 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 reply_markup=None,
             )
             await callback.answer()
+            answered = True
+        except _ApptAlreadyCancelledError:
+            # FIXED BUG-06: запись уже отменена — корректное сообщение пользователю
+            logger.info("cancel_appointment: appointment #%s already cancelled", appt_id)
+            await callback.answer("ℹ️ Эта запись уже была отменена ранее.", show_alert=True)
+            answered = True
+        except _ApptNotFoundError:
+            logger.warning("cancel_appointment: appointment #%s not found for user %s", appt_id, callback.from_user.id)
+            await callback.answer(MessageFormatter.appointment_not_found(), show_alert=True)
             answered = True
         except Exception as exc:
             logger.warning("Не удалось отменить запись %s: %s", appt_id, exc)

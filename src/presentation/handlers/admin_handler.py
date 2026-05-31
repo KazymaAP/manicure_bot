@@ -157,11 +157,14 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         appt_id = int(callback.data.split(":")[1])
         import asyncio
-        from src.domain.exceptions.appointment import AppointmentNotFoundError as _ApptNotFoundError
+        from src.domain.exceptions.appointment import (
+            AppointmentNotFoundError as _ApptNotFoundError,
+            AppointmentAlreadyCancelledError as _ApptAlreadyCancelledError,  # FIXED BUG-06
+        )
         appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
         try:
             # FIXED H-03: race condition — между get и cancel клиент мог уже отменить запись.
-            # Явно обрабатываем AppointmentNotFoundError — показываем понятное сообщение вместо общей ошибки.
+            # FIXED BUG-06: обрабатываем AppointmentAlreadyCancelledError отдельно от AppointmentNotFoundError.
             await asyncio.to_thread(appt_service.admin_cancel_appointment, appt_id)
             await callback.message.edit_text(
                 MessageFormatter.admin_cancel_success(appt_id, appt.client_name if appt else "?"),
@@ -180,11 +183,18 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                         "Не удалось уведомить клиента user_id=%s об отмене: %s",
                         appt.user_id, notify_exc,
                     )
-        except _ApptNotFoundError:
-            # FIXED H-03: запись уже была отменена (race condition) — показываем понятное сообщение
-            logger.warning("admin_confirm_cancel: appointment #%s already cancelled (race condition)", appt_id)
+        except _ApptAlreadyCancelledError:
+            # FIXED BUG-06: запись найдена, но уже отменена — корректное семантическое сообщение
+            logger.warning("admin_confirm_cancel: appointment #%s is already cancelled", appt_id)
             await callback.message.edit_text(
-                "ℹ️ Запись уже была отменена (возможно, клиент отменил сам).",
+                "ℹ️ Эта запись уже была отменена ранее.",
+                reply_markup=None,
+            )
+        except _ApptNotFoundError:
+            # FIXED H-03: запись не найдена (race condition или неверный ID)
+            logger.warning("admin_confirm_cancel: appointment #%s not found (race condition)", appt_id)
+            await callback.message.edit_text(
+                "ℹ️ Запись не найдена. Возможно, она уже была удалена.",
                 reply_markup=None,
             )
         except Exception as exc:
@@ -356,7 +366,21 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer("Нет прав администратора.", show_alert=True)
             return
         _, date_str, time_str = callback.data.split(":", 2)
+        import asyncio
         try:
+            # FIXED MED-04: проверяем, не забронирован ли слот перед удалением.
+            # Ранее delete_time_slot тихо возвращал False без объяснения причины.
+            # Теперь администратор получает понятное сообщение.
+            all_slots = await asyncio.to_thread(sched_service._schedule_repo.get_all_slots, date_str)
+            booked_slot = next((s for s in all_slots if s.time == time_str and s.is_booked), None)
+            if booked_slot:
+                await callback.answer(
+                    f"❌ Слот {time_str} на {date_str} уже забронирован клиентом.\n"
+                    "Сначала отмените запись клиента, затем удалите слот.",
+                    show_alert=True
+                )
+                return
+
             await sched_service.remove_slot(date_str, time_str)
             await callback.message.edit_text(
                 MessageFormatter.admin_slot_deleted(date_str, time_str),

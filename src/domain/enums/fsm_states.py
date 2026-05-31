@@ -20,8 +20,13 @@ class BookingFSM(StatesGroup):
 
 
 class AdminFSM(StatesGroup):
-    """Состояния FSM для панели администратора."""
-    main_menu = State()
+    """Состояния FSM для панели администратора.
+
+    FIXED BUG-10: удалено состояние main_menu — никогда не устанавливалось через
+    state.set_state(AdminFSM.main_menu), хендлеры с этим фильтром никогда не срабатывали.
+    Удаление исключает путаницу в коде. Вход в /admin не требует FSM-состояния.
+    """
+    # main_menu = State()  # REMOVED BUG-10: состояние никогда не использовалось
     waiting_for_appointment_id = State()
     confirming_cancel = State()
     waiting_for_date = State()

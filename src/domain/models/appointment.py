@@ -96,7 +96,9 @@ class Appointment:
             time=row["time"],
             created_at=created_at,
             reminder_sent=bool(row.get("reminder_sent", 0)),
-            status=AppointmentStatus(row.get("is_cancelled", 0)),
+            # FIXED MED-06: используем безопасный from_db_value() вместо прямого AppointmentStatus(value)
+            # Предотвращает ValueError при неизвестных значениях is_cancelled в БД
+            status=AppointmentStatus.from_db_value(row.get("is_cancelled", 0)),
             comment=row.get("comment"),
             service=row.get("service"),
         )
