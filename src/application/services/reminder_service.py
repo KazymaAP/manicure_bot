@@ -205,7 +205,7 @@ class ReminderService:
 
             for admin_id in self._admin_ids:
                 try:
-                    await self._notification_service.bot.send_message(admin_id, text, parse_mode="HTML")
+                    await self._notification_service.notify_admins_list(text)
                 except Exception as exc:
                     logger.warning("Failed to send digest to admin %s: %s", admin_id, exc)
         except Exception:

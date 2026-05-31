@@ -7,7 +7,7 @@ import re
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, BufferedInputFile
 
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import AdminFSM
@@ -500,10 +500,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         for a in appts:
             writer.writerow([a.id, a.user_id, a.username, a.client_name, a.phone, a.date, a.time, a.service, a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "", int(a.is_cancelled)])
         data = output.getvalue().encode("utf-8")
-        import io as _io
-        bio = _io.BytesIO(data)
-        bio.name = f"appointments_{from_date}_to_{to_date}.csv"
-        await message.answer_document(bio)
+        file = BufferedInputFile(data, filename=f"appointments_{from_date}_to_{to_date}.csv")
+        await message.answer_document(file)
         await state.clear()
 
     # ── Админ: открыть неделю вперёд ─────────────────────────────────────
@@ -623,7 +621,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         import asyncio
         try:
             # Отменяем все записи на дату и уведомляем клиентов
-            appts = await asyncio.to_thread(appt_service.get_by_date, date_str)
+            appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
             count = 0
             for a in appts:
                 try:
@@ -642,22 +640,12 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     # ── Навигация назад ───────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_back_main")
     async def admin_back_main(callback: CallbackQuery) -> None:
-        await callback.message.edit_text(
-            MessageFormatter.admin_welcome(),
-            reply_markup=None,
-            parse_mode="HTML",
-        )
-        await callback.answer()
-
-    # ── Навигация назад ───────────────────────────────────────────────────
-    @router.callback_query(F.data == "admin_back_main")
-    async def admin_back_main(callback: CallbackQuery) -> None:
-        await callback.message.edit_text(
-            MessageFormatter.admin_welcome(),
-            reply_markup=None,
-            parse_mode="HTML",
-        )
-        await callback.answer()
+       await callback.message.edit_text(
+           MessageFormatter.admin_welcome(),
+           reply_markup=None,
+           parse_mode="HTML",
+       )
+       await callback.answer()
 
     @router.callback_query(F.data == "admin_back_schedule")
     async def admin_back_schedule(callback: CallbackQuery) -> None:

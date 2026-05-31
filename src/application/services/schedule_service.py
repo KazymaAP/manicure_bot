@@ -235,6 +235,14 @@ class ScheduleService:
         """Async-обёртка для get_free_slots."""
         return self._schedule_repo.get_free_slots(date_str)
 
+    def get_workday_templates(self) -> list[dict]:
+        """Возвращает все сохранённые шаблоны рабочих дней."""
+        return self._schedule_repo.get_workday_templates()
+
+    def save_workday_template(self, name: str, schedule: str) -> int:
+        """Сохраняет шаблон рабочих дней."""
+        return self._schedule_repo.save_workday_template(name, schedule)
+
     def get_nearest_free_slots(self, limit: int = 5) -> list[tuple[str, str]]:
         """Возвращает ближайшие свободные слоты (date, time) в пределах horizon."""
         from datetime import date as _date, timedelta

@@ -71,6 +71,15 @@ class NotificationService:
         for admin_id in self._admin_ids:
             await self._safe_send(admin_id, text)
 
+    async def notify_admins_list(self, text: str) -> None:
+        """Отправляет текстовое уведомление всем администраторам.
+
+        Args:
+            text: Текст сообщения (HTML).
+        """
+        for admin_id in self._admin_ids:
+            await self._safe_send(admin_id, text)
+
     async def notify_channel_new_booking(self, appointment_id: int) -> None:
         """Публикует информацию о новой записи в канал расписания.
 
@@ -215,4 +224,21 @@ class NotificationService:
             return True
         except Exception as exc:
             logger.error("Failed to send message with markup to chat_id=%s: %s", chat_id, exc)
+            return False
+
+    async def _safe_send(self, chat_id: int, text: str) -> bool:
+        """Безопасно отправляет простое текстовое сообщение.
+
+        Args:
+            chat_id: ID чата.
+            text: Текст сообщения (HTML).
+
+        Returns:
+            True если сообщение отправлено.
+        """
+        try:
+            await self._bot.send_message(chat_id, text, parse_mode="HTML")
+            return True
+        except Exception as exc:
+            logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
             return False

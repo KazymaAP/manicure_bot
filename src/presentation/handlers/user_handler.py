@@ -6,6 +6,7 @@ from datetime import date as _date
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from src.config.dependencies import Container

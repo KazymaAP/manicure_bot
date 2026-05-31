@@ -5,7 +5,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 
 from src.config.dependencies import Container
 from src.presentation.formatters.message_formatter import MessageFormatter

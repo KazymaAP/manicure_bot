@@ -70,10 +70,8 @@ def setup_final_features_router(container: Container) -> Router:
     @router.message(Command("slots"))
     async def cmd_nearest_slots(message: Message) -> None:
         """FIXED: фича #5 — ближайшие 5 свободных слотов."""
-        import asyncio
-
         try:
-            available_dates = await asyncio.to_thread(sched_service.get_available_dates)
+            available_dates = await sched_service.get_available_dates_async()
             if not available_dates:
                 await message.answer("❌ " + MessageFormatter.no_available_dates())
                 return
@@ -105,10 +103,8 @@ def setup_final_features_router(container: Container) -> Router:
     @router.message(F.text == "📆 Расписание")
     async def view_schedule_for_client(message: Message) -> None:
         """FIXED: фича #46 — просмотр расписания с количеством свободных мест."""
-        import asyncio
-
         try:
-            available_dates = await asyncio.to_thread(sched_service.get_available_dates)
+            available_dates = await sched_service.get_available_dates_async()
             if not available_dates:
                 await message.answer("❌ Расписание пока не открыто")
                 return
@@ -215,10 +211,8 @@ def setup_final_features_router(container: Container) -> Router:
 
         Если < 3 свободных дней — отправляет уведомление администратору.
         """
-        import asyncio
-
         try:
-            available_dates = await asyncio.to_thread(sched_service.get_available_dates)
+            available_dates = await sched_service.get_available_dates_async()
             free_days = len(set(available_dates))  # Уникальные дни
 
             if free_days < 3:
@@ -252,7 +246,7 @@ def setup_final_features_router(container: Container) -> Router:
             return
 
         try:
-            available_dates = await asyncio.to_thread(sched_service.get_available_dates)
+            available_dates = await sched_service.get_available_dates_async()
 
             # Фильтруем даты по запросу
             matching_dates = [d for d in available_dates if query in d]

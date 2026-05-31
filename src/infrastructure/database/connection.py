@@ -44,6 +44,9 @@ class DatabaseManager:
         """Инициализирует менеджер с путём к файлу БД.
 
         Повторные инициализации с тем же путём безопасны; с другим путём — ошибка.
+
+        FIXED: добавлен реестр открытых соединений (self._connections) и блокировка
+        для возможности корректного закрытия всех соединений при shutdown/reset.
         """
         if self._initialized:
             if self._db_path != db_path:
@@ -54,6 +57,9 @@ class DatabaseManager:
         self._db_path = db_path
         self._initialized = True
         self._ensure_directory()
+        # Регистр всех соединений: thread_id -> sqlite3.Connection
+        self._connections: dict[int, sqlite3.Connection] = {}
+        self._connections_lock = threading.RLock()
         logger.debug("DatabaseManager initialized with path: %s", db_path)
 
     @classmethod
@@ -110,21 +116,30 @@ class DatabaseManager:
     def transaction(self) -> Generator[sqlite3.Connection, None, None]:
         """Контекстный менеджер для транзакций.
 
-        FIXED: BEGIN IMMEDIATE используется для предотвращения race condition при бронировании;
-        соединение НЕ закрывается в конце — переиспользуется per-thread.
+        FIXED: поддержка вложенных транзакций — если транзакция уже активна,
+        просто возвращаем соединение без начинания новой (аналог SAVEPOINT).
         """
         conn = self.get_connection()
+        in_transaction = False
         try:
-            # Начинаем явную транзакцию с блокировкой записи (atomicity across operations)
-            conn.execute("BEGIN IMMEDIATE")  # FIXED: избежать гонки при конкурентном бронировании
-            yield conn
-            conn.commit()
+            # Проверяем есть ли уже активная транзакция
+            # (isolation_level = None означает, что соединение в режиме autocommit)
+            if conn.isolation_level is not None:
+                # Уже в транзакции, просто возвращаем соединение
+                yield conn
+            else:
+                # Начинаем явную транзакцию с блокировкой записи (atomicity across operations)
+                conn.execute("BEGIN IMMEDIATE")  # FIXED: избежать гонки при конкурентном бронировании
+                in_transaction = True
+                yield conn
+                conn.commit()
         except Exception as exc:
             logger.error("Transaction rolled back due to error: %s", exc, exc_info=True)
-            try:
-                conn.rollback()
-            except Exception:
-                logger.exception("Rollback failed")
+            if in_transaction:
+                try:
+                    conn.rollback()
+                except Exception:
+                    logger.exception("Rollback failed")
             raise
 
     @contextmanager
@@ -207,7 +222,8 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS workday_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
-                slots TEXT NOT NULL -- JSON-encoded список ['09:00','10:00']
+                slots TEXT NOT NULL, -- JSON-encoded список ['09:00','10:00']
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             -- FIXED: таблица бэкапов для учета резервных копий (метаданные)
@@ -230,18 +246,26 @@ class DatabaseManager:
         logger.info("Database schema initialized successfully.")
 
     async def close(self) -> None:
-        """Закрывает соединение текущего потока с БД.
+        """Закрывает все соединения, известные менеджеру.
 
-        FIXED: ранее метод ничего не делал — теперь корректно закрывает thread-local соединение.
+        FIXED: ранее метод закрывал только соединение текущего потока. Теперь: закрываем
+        все зарегистрированные соединения, очищаем реестр и освобождаем ресурсы.
         """
-        logger.debug("DatabaseManager close called.")
+        logger.debug("DatabaseManager.close called. Closing all registered connections.")
         try:
-            if hasattr(self._thread_local, 'conn') and self._thread_local.conn:
-                try:
-                    self._thread_local.conn.close()
-                except Exception:
-                    logger.exception("Error closing DB connection")
-                finally:
+            # Закрываем все соединения, зарегистрированные в экземпляре
+            with getattr(self, '_connections_lock', threading.RLock()):
+                for tid, conn in list(getattr(self, '_connections', {}).items()):
+                    try:
+                        conn.close()
+                    except Exception:
+                        logger.exception("Error closing DB connection for thread %s", tid)
+                self._connections.clear()
+            # Также очистим thread-local указатель для текущего потока
+            try:
+                if hasattr(self._thread_local, 'conn'):
                     self._thread_local.conn = None
+            except Exception:
+                pass
         except Exception:
             logger.exception("Unexpected error during DatabaseManager.close()")

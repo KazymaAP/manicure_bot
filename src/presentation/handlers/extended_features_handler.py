@@ -160,24 +160,18 @@ def setup_extended_features_router(container: Container) -> Router:
 
             result = await asyncio.to_thread(appt_service.create_booking, dto)
 
-            if result.success:
-                await callback.message.answer(
-                    f"✅ <b>Запись перенесена успешно!</b>\n\n"
-                    f"📅 Новая дата: <b>{new_date}</b>\n"
-                    f"🕐 Новое время: <b>{time_str}</b>\n\n"
-                    f"📝 Ваши данные:\n"
-                    f"Имя: {data.get('client_name')}\n"
-                    f"Телефон: {data.get('phone')}",
-                    reply_markup=MainMenuKeyboard.main(),
-                )
-                # Уведомляем админов
-                await notif_service.notify_admin_new_booking(result.appointment_id)
-                await state.clear()
-            else:
-                await callback.answer(
-                    f"❌ Не удалось забронировать новый слот: {result.error}",
-                    show_alert=True,
-                )
+            await callback.message.answer(
+                f"✅ <b>Запись перенесена успешно!</b>\n\n"
+                f"📅 Новая дата: <b>{new_date}</b>\n"
+                f"🕐 Новое время: <b>{time_str}</b>\n\n"
+                f"📝 Ваши данные:\n"
+                f"Имя: {data.get('client_name')}\n"
+                f"Телефон: {data.get('phone')}",
+                reply_markup=MainMenuKeyboard.main(),
+            )
+            # Уведомляем админов
+            await notif_service.notify_admin_new_booking(result.appointment_id)
+            await state.clear()
         except Exception as exc:
             logger.exception("Transfer appointment error: %s", exc)
             await callback.answer("❌ Ошибка при переносе записи", show_alert=True)
@@ -196,7 +190,7 @@ def setup_extended_features_router(container: Container) -> Router:
         user_id = callback.from_user.id
 
         success = await asyncio.to_thread(
-            lambda: sched_service.schedule_repo.join_waitlist(user_id, date_str)
+            lambda: sched_service.join_waitlist(user_id, date_str)
         )
 
         if success:
@@ -348,7 +342,7 @@ def setup_extended_features_router(container: Container) -> Router:
         # Получаем список шаблонов из БД
         try:
             templates = await asyncio.to_thread(
-                lambda: sched_service.schedule_repo.get_workday_templates()
+                lambda: sched_service.get_workday_templates()
             )
         except Exception:
             templates = []
@@ -395,7 +389,7 @@ def setup_extended_features_router(container: Container) -> Router:
 
         try:
             await asyncio.to_thread(
-                lambda: sched_service.schedule_repo.save_workday_template(name, schedule)
+                lambda: sched_service.save_workday_template(name, schedule)
             )
             await message.answer(
                 f"✅ Шаблон <b>'{name}'</b> сохранён!\n\n"

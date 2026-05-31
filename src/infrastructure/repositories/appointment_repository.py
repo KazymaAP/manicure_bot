@@ -207,14 +207,6 @@ class AppointmentRepository(BaseRepository):
             ).fetchall()
         return [Appointment.from_row(dict(row)) for row in rows]
 
-    def get_by_date_range(self, from_date: str, to_date: str) -> list[Appointment]:
-        with self._db.read_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM appointments WHERE date BETWEEN ? AND ? ORDER BY date, time",
-                (from_date, to_date),
-            ).fetchall()
-        return [Appointment.from_row(dict(row)) for row in rows]
-
     def search_by_client(self, query: str) -> list[Appointment]:
         """Ищет записи по имени клиента или телефону (простое LIKE-поиск)."""
         q = f"%{query}%"
@@ -268,15 +260,6 @@ class AppointmentRepository(BaseRepository):
             "last_visit_date": None,
             "last_completed_date": None,
         }
-
-    def get_by_date(self, date_str: str) -> list[Appointment]:
-        """Возвращает все активные записи на конкретную дату."""
-        with self._db.read_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM appointments WHERE date = ? AND is_cancelled = 0 ORDER BY time",
-                (date_str,),
-            ).fetchall()
-        return [Appointment.from_row(dict(row)) for row in rows]
 
     def get_month_statistics(self, year: int, month: int) -> dict:
         """Возвращает статистику по месяцам для админ-панели.

@@ -425,15 +425,13 @@ class ScheduleRepository(BaseRepository):
 
         FIXED: фича #12 — шаблоны рабочих дней для быстрого открытия.
         """
-        from datetime import datetime
-
         with self._db.transaction() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO workday_templates (name, schedule, created_at)
-                VALUES (?, ?, ?)
+                INSERT INTO workday_templates (name, slots, created_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
                 """,
-                (name, schedule, datetime.now().isoformat()),
+                (name, schedule),
             )
         return cur.lastrowid
 
@@ -441,7 +439,7 @@ class ScheduleRepository(BaseRepository):
         """Возвращает все сохранённые шаблоны."""
         with self._db.read_connection() as conn:
             rows = conn.execute(
-                "SELECT id, name, schedule FROM workday_templates ORDER BY created_at DESC"
+                "SELECT id, name, slots FROM workday_templates ORDER BY created_at DESC"
             ).fetchall()
         return [dict(r) for r in rows]
 
