@@ -171,13 +171,11 @@ class Container:
             keep_count=7,
         )
 
-        # Создаём ReminderService с персистентным jobstore (sqlite на том же файле БД) и параметрами для дайджеста/бэкапа
+        # Создаём ReminderService. В локальном запуске используем in-memory jobstore
+        # чтобы избежать проблем с сериализацией bound-methods при сохранении в SQLite.
+        # Для персистентности в продакшне задайте JOBSTORE_PERSISTENT=true и реализуйте
+        # соответствующую логику при деплое.
         jobstore_url = None
-        try:
-            # абсолютный путь к sqlite для SQLAlchemyJobStore
-            jobstore_url = f"sqlite:///{os.path.abspath(self._settings.db_path)}"
-        except Exception:
-            jobstore_url = None
 
         # FIXED C-06: передаём timezone для корректного расчёта времени напоминаний
         # FIXED BUG-H2: передаём schedule_service напрямую, чтобы ReminderService
