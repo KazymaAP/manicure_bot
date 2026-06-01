@@ -26,9 +26,10 @@ dependencies = [
 [project.optional-dependencies]
 redis = ["redis==5.2.0"]
 dev = [
-    "pytest==7.4.3",
-    "pytest-asyncio==0.23.2",
-    "mypy==1.7.1",
+    # FIXED C-8: синхронизированы версии с requirements.txt
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "mypy==1.11.2",
     "types-aiohttp==3.9.2",
 ]
 

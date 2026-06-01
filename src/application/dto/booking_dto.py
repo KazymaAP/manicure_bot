@@ -56,6 +56,17 @@ class CreateBookingDTO:
                 f"Time value out of range: {self.time!r}. Hours 0-23, minutes 0-59."
             )
 
+        # FIXED C-7: валидация номера телефона на уровне бизнес-логики.
+        # Телефон принимается как строка, но должен соответствовать формату.
+        # Это предотвращает сохранение произвольных строк (типа "haha_not_a_phone") в БД.
+        if self.phone:
+            normalized_phone = re.sub(r"[\s\-()]+", "", self.phone)
+            if not re.match(r"^\+?[\d]{7,15}$", normalized_phone):
+                raise ValueError(
+                    f"Invalid phone format: {self.phone!r}. "
+                    "Expected format like +79991234567 or 89991234567."
+                )
+
 
 @dataclass(frozen=True, slots=True)
 class BookingResultDTO:

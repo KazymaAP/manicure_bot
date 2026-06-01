@@ -168,6 +168,29 @@ class AppointmentRepository(BaseRepository):
             ).fetchall()
         return [Appointment.from_row(dict(row)) for row in rows]
 
+    def get_all_active_paginated(self, limit: int = 20, offset: int = 0) -> list[Appointment]:
+        """FIXED H-9: пагинированная версия get_all_active — предотвращает огромные
+        сообщения Telegram (>4096 символов) при большом количестве записей.
+
+        Args:
+            limit: Максимальное число записей на странице (по умолчанию 20).
+            offset: Смещение (номер страницы * limit).
+
+        Returns:
+            Список записей для текущей страницы.
+        """
+        with self._db.read_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM appointments
+                WHERE is_cancelled = 0
+                ORDER BY date, time
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return [Appointment.from_row(dict(row)) for row in rows]
+
     def get_statistics_raw(self) -> dict[str, int]:
         """FIXED: объединённые COUNT(*) в одном запросе для эффективности."""
         from datetime import date as _date
@@ -207,12 +230,54 @@ class AppointmentRepository(BaseRepository):
             ).fetchall()
         return [Appointment.from_row(dict(row)) for row in rows]
 
-    def search_by_client(self, query: str) -> list[Appointment]:
-        """Ищет записи по имени клиента или телефону (простое LIKE-поиск)."""
-        q = f"%{query}%"
+    def get_all_paginated(self, limit: int = 20, offset: int = 0) -> list[Appointment]:
+        """FIXED H-9: пагинированная версия get_all для безопасного отображения.
+
+        Args:
+            limit: Максимальное число записей.
+            offset: Смещение.
+
+        Returns:
+            Список записей.
+        """
         with self._db.read_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM appointments WHERE client_name LIKE ? OR phone LIKE ? ORDER BY date, time",
+                """
+                SELECT * FROM appointments
+                ORDER BY date, time
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return [Appointment.from_row(dict(row)) for row in rows]
+
+    def count_all(self) -> int:
+        """Возвращает общее количество записей (для пагинации)."""
+        with self._db.read_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) as cnt FROM appointments").fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
+    def count_all_active(self) -> int:
+        """Возвращает количество активных записей (для пагинации)."""
+        with self._db.read_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) as cnt FROM appointments WHERE is_cancelled = 0").fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
+    def search_by_client(self, query: str) -> list[Appointment]:
+        """Ищет записи по имени клиента или телефону.
+
+        FIXED C-3: экранирование спецсимволов LIKE (%, _, \\) чтобы предотвратить
+        раскрытие всей БД при поисковом запросе '%'.
+        Также ограничена длина поискового запроса до 100 символов.
+        """
+        # Ограничиваем длину запроса
+        query = query[:100]
+        # Экранируем спецсимволы LIKE: \, %, _
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        q = f"%{escaped}%"
+        with self._db.read_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM appointments WHERE (client_name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\') ORDER BY date, time",
                 (q, q),
             ).fetchall()
         return [Appointment.from_row(dict(row)) for row in rows]

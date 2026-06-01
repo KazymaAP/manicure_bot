@@ -34,12 +34,24 @@ COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 
+# FIXED H-10: создаём непривилегированного пользователя для запуска бота.
+# Запуск от root при наличии RCE-уязвимости позволяет атакующему получить
+# root-права внутри контейнера и при неверной настройке — на хосте.
+RUN groupadd --gid 1001 botuser && \
+    useradd --uid 1001 --gid 1001 --no-create-home --shell /bin/false botuser
+
 # Копирование исходного кода (без тестов, кэша и т.д. — см. .dockerignore)
 COPY . .
 
 # Директория для базы данных
-RUN mkdir -p /app/data && chmod 755 /app/data
-# FIXED: убрать chmod 777 — сделать права 755 для безопасности (не даём права на запись всем)
+RUN mkdir -p /app/data && chown -R botuser:botuser /app/data && chmod 750 /app/data
+
+# Устанавливаем владельца для всего приложения
+RUN chown -R botuser:botuser /app
+
+# FIXED H-10: переключаемся на непривилегированного пользователя
+USER botuser
 
 # Запуск бота
 CMD ["python", "main.py"]
+

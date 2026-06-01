@@ -5,12 +5,13 @@ src/config/settings.py — Централизованная конфигурац
 ✅ Из v2_zip: portfolio_url + redis_url
 ✅ Улучшения v4: field_validator для channel_id, default_time_slots validation,
    добавлен reminder_hours_before + max_appointments_per_user
+FIXED H-3: bot_token использует SecretStr чтобы токен не попадал в логи/traceback.
 """
 from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,7 +23,9 @@ class Settings(BaseSettings):
     """
 
     # ─── Основные настройки Telegram ─────────────────────────
-    bot_token: str = Field(..., description="Токен Telegram бота")
+    # FIXED H-3: SecretStr гарантирует что токен не попадёт в логи/traceback при ошибках валидации.
+    # Используйте settings.bot_token.get_secret_value() для получения реального значения.
+    bot_token: SecretStr = Field(..., description="Токен Telegram бота")
     admin_ids_raw: str = Field(
         default="",
         alias="ADMIN_IDS",
@@ -184,6 +187,12 @@ class Settings(BaseSettings):
         description="Порт HTTP health-check сервера",
     )
 
+    # FIXED C-5: токен для защиты /metrics эндпоинта
+    metrics_token: str | None = Field(
+        default=None,
+        description="Bearer-токен для защиты /metrics HTTP endpoint (опционально).",
+    )
+
     # ─── Приветственное фото ─────────────────────────────────
     welcome_photo_url: str | None = Field(
         default=None,
@@ -193,9 +202,13 @@ class Settings(BaseSettings):
     # ─── Валидаторы ──────────────────────────────────────────
     @field_validator("bot_token")
     @classmethod
-    def validate_bot_token(cls, v: str) -> str:
-        """Проверяет, что токен не пустой (разрешает placeholder для тестирования)."""
-        if not v:
+    def validate_bot_token(cls, v: SecretStr) -> SecretStr:
+        """Проверяет, что токен не пустой (разрешает placeholder для тестирования).
+
+        FIXED H-3: принимает SecretStr — реальное значение не попадёт в traceback.
+        """
+        val = v.get_secret_value()
+        if not val:
             raise ValueError("BOT_TOKEN must be set")
         # Разрешаем placeholder значения (будут проверены при реальном запуске)
         return v
@@ -264,7 +277,20 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Возвращает единственный экземпляр настроек (кэшированный).
 
+    FIXED H-3: обёрнут в try/except чтобы при ошибке валидации токен не попадал
+    в traceback (SecretStr скрывает значение, но дополнительная обёртка делает
+    сообщение об ошибке чище и безопаснее).
+
     Returns:
         Настроенный и провалидированный объект Settings.
     """
-    return Settings()
+    import logging as _logging
+    try:
+        return Settings()
+    except Exception as exc:
+        _logging.getLogger(__name__).critical(
+            "Failed to load settings: %s. "
+            "Check your .env file. BOT_TOKEN and ADMIN_IDS are required.",
+            exc,
+        )
+        raise

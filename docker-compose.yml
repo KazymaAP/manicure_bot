@@ -1,4 +1,7 @@
 
+# FIXED H-5: добавлена версия, явная сеть и секция для Redis с healthcheck
+version: "3.9"
+
 services:
   bot:
     build: .
@@ -11,11 +14,15 @@ services:
     environment:
       - DB_PATH=/app/data/manicure_bot.db
       - HEALTH_PORT=8080
-    ports:
-      - "8080:8080"
+    # FIXED H-8: не пробрасываем 8080 наружу — health server слушает только 127.0.0.1
+    # Если нужен внешний мониторинг — используйте внутреннюю Docker-сеть или nginx-прокси
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+    networks:
+      - bot_network
     # FIXED: добавлены healthcheck и restart policy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8080/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -26,8 +33,21 @@ services:
   #   image: redis:7-alpine
   #   container_name: manicure_bot_redis
   #   restart: unless-stopped
+  #   # FIXED H-5: healthcheck для Redis
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+  #   networks:
+  #     - bot_network
   #   volumes:
   #     - redis_data:/data
+
+networks:
+  # FIXED H-5: явная сеть для изоляции сервисов
+  bot_network:
+    driver: bridge
 
 volumes:
   bot_data:

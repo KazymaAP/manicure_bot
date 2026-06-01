@@ -246,6 +246,9 @@ class NotificationService:
         При Forbidden-ошибке user_id добавляется в _blocked_users и исключается из
         будущих рассылок, что предотвращает бесконечный рост нагрузки.
 
+        FIXED H-7: обрабатывает TelegramRetryAfter (429 Too Many Requests) —
+        ждёт указанное время и делает повторную попытку вместо тихой потери сообщения.
+
         Args:
             chat_id: ID чата.
             text: Текст сообщения (HTML).
@@ -258,32 +261,55 @@ class NotificationService:
             logger.debug("Skipping send to blocked user %s", chat_id)
             return False
 
-        try:
-            await self._bot.send_message(chat_id, text, parse_mode="HTML")
-            return True
-        except Exception as exc:
-            # FIXED BUG-05: используем isinstance() с реальным классом aiogram,
-            # а не хрупкую проверку по имени класса через строку.
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                from aiogram.exceptions import TelegramForbiddenError
-                if isinstance(exc, TelegramForbiddenError):
-                    logger.warning(
-                        "Cannot send message to chat_id=%s — bot blocked by user: %s. "
-                        "Adding to blocked list to prevent future sends.",
-                        chat_id, exc,
-                    )
-                    # FIXED BUG-05: помечаем как заблокированного — исключаем из будущих рассылок
-                    self._blocked_users.add(chat_id)
-                    return False
-            except ImportError:
-                # Fallback если структура aiogram.exceptions изменилась
-                exc_name = type(exc).__name__
-                if "Forbidden" in exc_name or "BotBlocked" in exc_name or "UserDeactivated" in exc_name:
-                    logger.warning(
-                        "Cannot send message to chat_id=%s — bot blocked or user deactivated: %s",
-                        chat_id, exc,
-                    )
-                    self._blocked_users.add(chat_id)
-                    return False
-            logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
-            return False
+                await self._bot.send_message(chat_id, text, parse_mode="HTML")
+                return True
+            except Exception as exc:
+                # FIXED H-7: обработка flood control (429 Too Many Requests)
+                try:
+                    from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
+                    if isinstance(exc, TelegramRetryAfter):
+                        retry_after = getattr(exc, "retry_after", 5)
+                        logger.warning(
+                            "Rate limit hit for chat_id=%s, retry after %s seconds (attempt %d/%d)",
+                            chat_id, retry_after, attempt + 1, max_retries,
+                        )
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_after)
+                            continue
+                        else:
+                            logger.error("Max retries exceeded for chat_id=%s after TelegramRetryAfter", chat_id)
+                            return False
+                    # FIXED BUG-05: используем isinstance() с реальным классом aiogram,
+                    # а не хрупкую проверку по имени класса через строку.
+                    if isinstance(exc, TelegramForbiddenError):
+                        logger.warning(
+                            "Cannot send message to chat_id=%s — bot blocked by user: %s. "
+                            "Adding to blocked list to prevent future sends.",
+                            chat_id, exc,
+                        )
+                        # FIXED BUG-05: помечаем как заблокированного — исключаем из будущих рассылок
+                        self._blocked_users.add(chat_id)
+                        return False
+                except ImportError:
+                    # Fallback если структура aiogram.exceptions изменилась
+                    exc_name = type(exc).__name__
+                    if "RetryAfter" in exc_name or "TooManyRequests" in exc_name:
+                        retry_after = getattr(exc, "retry_after", 5)
+                        logger.warning("Rate limit (fallback): chat_id=%s, retry after %ss", chat_id, retry_after)
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_after)
+                            continue
+                        return False
+                    if "Forbidden" in exc_name or "BotBlocked" in exc_name or "UserDeactivated" in exc_name:
+                        logger.warning(
+                            "Cannot send message to chat_id=%s — bot blocked or user deactivated: %s",
+                            chat_id, exc,
+                        )
+                        self._blocked_users.add(chat_id)
+                        return False
+                logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
+                return False
+        return False

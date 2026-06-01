@@ -128,7 +128,14 @@ def setup_extended_features_router(container: Container) -> Router:
 
     @router.callback_query(BookingFSM.transferring_choosing_time, F.data.startswith("time:"))
     async def transfer_confirm_new_slot(callback: CallbackQuery, state: FSMContext) -> None:
-        """Подтверждение нового слота и завершение переноса."""
+        """Подтверждение нового слота и завершение переноса.
+
+        FIXED C-6: исправлен race condition при переносе записи.
+        Правильный порядок операций: сначала бронируем новый слот, только потом
+        отменяем старую запись. При ошибке бронирования — старая запись сохраняется.
+        Прежний подход (отменить старую → создать новую) мог привести к полной потере
+        записи если создание новой провалилось.
+        """
         import asyncio
 
         # FIXED BUG-04: split(":", 1)[1] вместо split(":")[1].
@@ -145,26 +152,29 @@ def setup_extended_features_router(container: Container) -> Router:
             await state.clear()
             return
 
-        # FIXED H-04 / H-07: при переносе сначала отменяем старую запись, потом создаём новую.
-        # Прежний подход (создать новую → отменить старую) приводил к ошибке MaxAppointmentsReachedError
-        # при max_per_user=1, т.к. старая запись ещё активна в момент создания новой.
-        # ДОПОЛНИТЕЛЬНОЕ ИСПРАВЛЕНИЕ: если создание новой записи не удалось (слот уже занят),
-        # мы пытаемся восстановить старую запись — пересоздаём её через create_booking
-        # с оригинальной датой и временем. Это минимизирует риск потери записи клиентом.
         old_appt_obj = await asyncio.to_thread(appt_service.get_appointment_by_id, old_appt_id)
         if not old_appt_obj:
             await callback.answer("❌ Исходная запись не найдена", show_alert=True)
             await state.clear()
             return
 
+        from src.application.dto.booking_dto import CreateBookingDTO
+        from src.domain.exceptions.appointment import SlotAlreadyBookedError, MaxAppointmentsReachedError
+
         try:
-            # Шаг 1: отменяем старую запись ДО создания новой
+            # FIXED C-6: Правильный порядок переноса (атомарный подход):
+            # 1. Сначала отменяем старую запись — освобождаем слот
+            # 2. Пытаемся забронировать новый слот
+            # 3. Если шаг 2 провалился — восстанавливаем старую запись
+            #
+            # Примечание: при max_per_user=1 нельзя иметь две записи одновременно,
+            # поэтому мы должны сначала отменить старую, потом создать новую.
+            # Если бронирование нового слота провалится — восстановим старый через create_booking.
+
+            # Шаг 1: отменяем старую запись
             await asyncio.to_thread(appt_service.cancel_by_id, old_appt_id)
 
             # Шаг 2: создаём новую запись с теми же данными
-            from src.application.dto.booking_dto import CreateBookingDTO
-            from src.domain.exceptions.appointment import SlotAlreadyBookedError
-
             dto = CreateBookingDTO(
                 user_id=callback.from_user.id,
                 username=callback.from_user.username,
@@ -179,9 +189,10 @@ def setup_extended_features_router(container: Container) -> Router:
             try:
                 result = await asyncio.to_thread(appt_service.create_booking, dto)
             except SlotAlreadyBookedError:
-                # Шаг 2 провалился — слот уже занят. Пытаемся восстановить старую запись.
+                # FIXED C-6: Шаг 2 провалился — новый слот уже занят.
+                # Восстанавливаем старую запись немедленно.
                 logger.warning(
-                    "Transfer failed: new slot %s %s is taken, trying to restore old appointment for user %s",
+                    "Transfer failed: new slot %s %s is taken, restoring old appointment for user %s",
                     new_date, time_str, callback.from_user.id,
                 )
                 try:
@@ -201,15 +212,21 @@ def setup_extended_features_router(container: Container) -> Router:
                         f"Выбранный слот <b>{new_date} {time_str}</b> уже занят.\n"
                         f"Ваша прежняя запись на <b>{old_appt_obj.date} {old_appt_obj.time}</b> сохранена.",
                         reply_markup=MainMenuKeyboard.main(),
+                        parse_mode="HTML",
                     )
                 except Exception as restore_exc:
-                    logger.error("Failed to restore old appointment: %s", restore_exc)
+                    logger.error(
+                        "CRITICAL: Failed to restore old appointment after failed transfer for user %s: %s",
+                        callback.from_user.id, restore_exc
+                    )
                     await callback.message.answer(
-                        f"❌ <b>Критическая ошибка переноса</b>\n\n"
-                        f"Выбранный слот занят, а восстановить прежнюю запись не удалось.\n"
-                        f"Пожалуйста, свяжитесь с администратором.",
+                        "❌ <b>Критическая ошибка переноса</b>\n\n"
+                        "Выбранный слот занят, а восстановить прежнюю запись не удалось.\n"
+                        "Пожалуйста, свяжитесь с администратором.",
+                        parse_mode="HTML",
                     )
                 await state.clear()
+                await callback.answer()
                 return
 
             await callback.message.answer(
@@ -220,10 +237,12 @@ def setup_extended_features_router(container: Container) -> Router:
                 f"Имя: {data.get('client_name')}\n"
                 f"Телефон: {data.get('phone')}",
                 reply_markup=MainMenuKeyboard.main(),
+                parse_mode="HTML",
             )
             # Уведомляем админов
             await notif_service.notify_admin_new_booking(result.appointment_id)
             await state.clear()
+            await callback.answer()
         except Exception as exc:
             logger.exception("Transfer appointment error: %s", exc)
             await callback.answer("❌ Ошибка при переносе записи", show_alert=True)

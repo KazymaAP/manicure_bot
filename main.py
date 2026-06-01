@@ -66,7 +66,8 @@ async def main() -> None:
 
     # ── Бот и диспетчер ───────────────────────────────────────────────────
     bot = Bot(
-        token=settings.bot_token,
+        # FIXED H-3: SecretStr — получаем реальное значение через get_secret_value()
+        token=settings.bot_token.get_secret_value(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=storage)
@@ -124,10 +125,13 @@ async def main() -> None:
         from src.infrastructure.http.health_server import HealthServer
 
         # FIXED H-04: используем settings.health_port вместо небезопасного os.getenv()
-        # Это проходит Pydantic-валидацию и не упадёт с ValueError при неверном значении
+        # FIXED C-5: передаём metrics_token для защиты /metrics эндпоинта
+        # FIXED H-8: биндимся на 127.0.0.1 (только локально) для безопасности
         health_server = HealthServer(
             appointment_service=container.appointment_service,
             port=settings.health_port,
+            metrics_token=settings.metrics_token,
+            bind_host="127.0.0.1",
         )
         await health_server.setup()
     except ImportError:

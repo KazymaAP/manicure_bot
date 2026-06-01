@@ -195,30 +195,37 @@ class ReminderService:
         await self._notification_service.send_reminder(user_id, time_str, appointment_id)
 
     def schedule_weekly_archive(self, hour: int = 3, minute: int = 0) -> None:
-        """FIXED: планирует еженедельную архивацию старых записей (по воскресеньям в 3:00 UTC)."""
+        """FIXED: планирует еженедельную архивацию старых записей (по воскресеньям в 3:00).
+
+        FIXED H-6: передаём timezone в CronTrigger чтобы задача работала в правильном
+        часовом поясе, а не всегда в UTC.
+        """
         from apscheduler.triggers.cron import CronTrigger  # type: ignore
 
         job_id = "weekly_archive"
         self._scheduler.add_job(
             self._weekly_archive_job,
-            trigger=CronTrigger(day_of_week="sun", hour=hour, minute=minute),
+            trigger=CronTrigger(day_of_week="sun", hour=hour, minute=minute, timezone=self._timezone),
             id=job_id,
             replace_existing=True,
         )
-        logger.info("Weekly archive job scheduled on Sunday at %02d:%02d UTC", hour, minute)
+        logger.info("Weekly archive job scheduled on Sunday at %02d:%02d %s", hour, minute, self._timezone)
 
     def schedule_insufficient_slots_check(self, hour: int = 10, minute: int = 0) -> None:
-        """FIXED: планирует ежедневную проверку количества доступных слотов."""
+        """FIXED: планирует ежедневную проверку количества доступных слотов.
+
+        FIXED H-6: передаём timezone в CronTrigger.
+        """
         from apscheduler.triggers.cron import CronTrigger  # type: ignore
 
         job_id = "insufficient_slots_check"
         self._scheduler.add_job(
             self._insufficient_slots_check_job,
-            trigger=CronTrigger(hour=hour, minute=minute),
+            trigger=CronTrigger(hour=hour, minute=minute, timezone=self._timezone),
             id=job_id,
             replace_existing=True,
         )
-        logger.info("Insufficient slots check scheduled at %02d:%02d UTC", hour, minute)
+        logger.info("Insufficient slots check scheduled at %02d:%02d %s", hour, minute, self._timezone)
 
     async def _weekly_archive_job(self) -> None:
         """Архивирует старые записи (старше 90 дней)."""
@@ -291,25 +298,27 @@ class ReminderService:
             logger.exception("Insufficient slots check job failed")
 
     def schedule_daily_digest(self, hour: int = 9, minute: int = 0) -> None:
-        """Планирует ежедневный дайджест администратору в указанное время (UTC).
+        """Планирует ежедневный дайджест администратору в указанное время.
 
-        FIXED: рассылка сводки администратору каждое утро в 9:00 UTC.
+        FIXED: рассылка сводки администратору каждое утро в 9:00.
+        FIXED H-6: передаём timezone в CronTrigger.
         """
         from apscheduler.triggers.cron import CronTrigger  # type: ignore
 
         job_id = "daily_digest"
         self._scheduler.add_job(
             self._daily_digest_job,
-            trigger=CronTrigger(hour=hour, minute=minute),
+            trigger=CronTrigger(hour=hour, minute=minute, timezone=self._timezone),
             id=job_id,
             replace_existing=True,
         )
-        logger.info("Daily digest scheduled at %02d:%02d UTC", hour, minute)
+        logger.info("Daily digest scheduled at %02d:%02d %s", hour, minute, self._timezone)
 
     def schedule_daily_backup(self, hour: int = 2, minute: int = 0) -> None:
-        """Планирует ежедневный бэкап БД в указанное время (UTC).
+        """Планирует ежедневный бэкап БД в указанное время.
 
-        FIXED: автоматический бэкап с ротацией каждый день в 2:00 UTC.
+        FIXED: автоматический бэкап с ротацией каждый день в 2:00.
+        FIXED H-6: передаём timezone в CronTrigger.
         """
         from apscheduler.triggers.cron import CronTrigger  # type: ignore
 
@@ -319,11 +328,11 @@ class ReminderService:
         job_id = "daily_backup"
         self._scheduler.add_job(
             self._daily_backup_job,
-            trigger=CronTrigger(hour=hour, minute=minute),
+            trigger=CronTrigger(hour=hour, minute=minute, timezone=self._timezone),
             id=job_id,
             replace_existing=True,
         )
-        logger.info("Daily backup scheduled at %02d:%02d UTC", hour, minute)
+        logger.info("Daily backup scheduled at %02d:%02d %s", hour, minute, self._timezone)
 
     async def _daily_digest_job(self) -> None:
         """Отправляет ежедневный дайджест администраторам."""

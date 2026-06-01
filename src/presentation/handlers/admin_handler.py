@@ -103,10 +103,28 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not appointments:
             await callback.message.edit_text(MessageFormatter.admin_appointments_empty())
         else:
+            # FIXED H-9: ограничиваем вывод первыми 20 записями для предотвращения
+            # ошибки Telegram API (лимит 4096 символов) при большом количестве записей.
+            PAGE_SIZE = 20
+            page_appts = appointments[:PAGE_SIZE]
+            total = len(appointments)
+            filter_label = filter_names.get(filter_key, filter_key)
             text = MessageFormatter.admin_appointments_list(
-                appointments, filter_name=filter_names.get(filter_key, filter_key)
+                page_appts, filter_name=filter_label
             )
-            await callback.message.edit_text(text, parse_mode="HTML")
+            if total > PAGE_SIZE:
+                text += f"\n\n📊 <i>Показано {PAGE_SIZE} из {total} записей. Используйте фильтры для уточнения.</i>"
+            try:
+                await callback.message.edit_text(text, parse_mode="HTML")
+            except Exception:
+                # Если сообщение всё равно слишком длинное — режем дополнительно
+                short_appts = appointments[:10]
+                short_text = MessageFormatter.admin_appointments_list(
+                    short_appts, filter_name=filter_label
+                )
+                if total > 10:
+                    short_text += f"\n\n📊 <i>Показано 10 из {total} записей.</i>"
+                await callback.message.edit_text(short_text, parse_mode="HTML")
         await callback.answer()
 
     # ── Отменить запись ───────────────────────────────────────────────────
@@ -468,9 +486,18 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
-        await state.update_data(broadcast_text=message.text)
+        # FIXED H-4: ограничиваем длину текста рассылки до 4000 символов
+        # (лимит Telegram на сообщение — 4096, оставляем буфер для форматирования)
+        broadcast_text = message.text
+        if len(broadcast_text) > 4000:
+            await message.answer(
+                f"⚠️ Текст рассылки слишком длинный ({len(broadcast_text)} символов). "
+                "Максимальная длина — 4000 символов. Сократите текст."
+            )
+            return
+        await state.update_data(broadcast_text=broadcast_text)
         await message.answer("Предпросмотр рассылки:", parse_mode="HTML")
-        await message.answer(message.text, parse_mode="HTML", reply_markup=AdminKeyboard.broadcast_confirm(message.text))
+        await message.answer(broadcast_text, parse_mode="HTML", reply_markup=AdminKeyboard.broadcast_confirm(broadcast_text))
 
     @router.callback_query(F.data == "admin_broadcast_send")
     async def admin_broadcast_send(callback: CallbackQuery, state: FSMContext) -> None:
