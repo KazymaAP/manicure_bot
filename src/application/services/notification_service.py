@@ -9,6 +9,7 @@ src/application/services/notification_service.py — Сервис уведомл
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -65,7 +66,6 @@ class NotificationService:
         Args:
             appointment_id: ID созданной записи.
         """
-        import asyncio
         appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         if not appt:
             logger.warning("Cannot notify admin: appointment #%s not found", appointment_id)
@@ -98,7 +98,6 @@ class NotificationService:
         Args:
             appointment_id: ID созданной записи.
         """
-        import asyncio
         appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         if not appt:
             return
@@ -116,7 +115,6 @@ class NotificationService:
         Args:
             appointment_id: ID отменённой записи.
         """
-        import asyncio
         appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         if not appt:
             return

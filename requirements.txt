@@ -18,3 +18,8 @@ pytest-asyncio==0.24.0
 mypy==1.11.2
 # Stubs для aiohttp (только для mypy, не нужен в runtime)
 types-aiohttp==3.9.2
+
+# Optional: Redis для FSM-хранилища в production
+# Раскомментируйте строку ниже если используете Redis:
+# redis==5.0.1
+# aiogram[redis]==3.13.1

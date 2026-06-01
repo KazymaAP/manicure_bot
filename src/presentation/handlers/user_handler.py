@@ -11,7 +11,11 @@ from aiogram.types import CallbackQuery, Message
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import BookingFSM
 
-from src.domain.exceptions.appointment import SlotAlreadyBookedError
+from src.domain.exceptions.appointment import (
+    SlotAlreadyBookedError,
+    AppointmentAlreadyCancelledError as _ApptAlreadyCancelledError,
+    AppointmentNotFoundError as _ApptNotFoundError,
+)
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.handlers.common_handler import _get_portfolio
 from src.presentation.keyboards.booking import BookingKeyboard
@@ -449,10 +453,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data.startswith("cancel_appt:"))
     async def cancel_appointment(callback: CallbackQuery) -> None:
         import asyncio
-        from src.domain.exceptions.appointment import (
-            AppointmentNotFoundError as _ApptNotFoundError,
-            AppointmentAlreadyCancelledError as _ApptAlreadyCancelledError,  # FIXED BUG-06
-        )
         appt_id = int(callback.data.split(":")[1])
         answered = False
         try:

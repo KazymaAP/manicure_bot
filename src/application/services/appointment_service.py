@@ -15,7 +15,12 @@ import sqlite3
 
 from src.application.dto.booking_dto import BookingResultDTO, CreateBookingDTO
 from src.domain.exceptions import AppointmentNotFoundError
-from src.domain.exceptions.appointment import AppointmentAlreadyCancelledError
+from src.domain.exceptions.appointment import (
+    AppointmentAlreadyCancelledError,
+    BlacklistedUserError,
+    MaxAppointmentsReachedError,
+    SlotAlreadyBookedError,
+)
 from src.domain.models.appointment import Appointment
 from src.infrastructure.repositories.appointment_repository import AppointmentRepository
 from src.infrastructure.repositories.schedule_repository import ScheduleRepository
@@ -72,18 +77,12 @@ class AppointmentService:
                 active_count = int(row["cnt"] or 0) if row else 0
                 if active_count >= self._max_per_user:
                     # FIXED: используем соотв. исключение
-                    from src.domain.exceptions.appointment import MaxAppointmentsReachedError
-
                     raise MaxAppointmentsReachedError(self._max_per_user)
 
                 # 2) проверяем чёрный список
                 try:
                     blk_row = conn.execute("SELECT user_id FROM blacklist WHERE user_id = ?", (dto.user_id,)).fetchone()
                     if blk_row:
-                        from src.domain.exceptions.appointment import MaxAppointmentsReachedError
-                        # FIXED: использует специальное исключение BlacklistedUserError
-                        from src.domain.exceptions.appointment import BlacklistedUserError
-
                         raise BlacklistedUserError(dto.user_id)
                 except sqlite3.OperationalError:
                     # таблицы blacklist может не быть в старой схеме — игнорируем
@@ -100,12 +99,9 @@ class AppointmentService:
 
                 booked = self._schedule_repo.book_slots_with_conn(conn, dto.date, dto.time, duration)
                 if not booked:
-                    from src.domain.exceptions.appointment import SlotAlreadyBookedError
-
                     raise SlotAlreadyBookedError(dto.date, dto.time)
 
                 # 4) вставляем запись в appointments в той же транзакции
-                # FIXED C-05: убран антипаттерн __import__("datetime") внутри горячего пути/транзакции
                 created_at = (
                     dto.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(dto, "created_at", None) else _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 )
@@ -141,7 +137,6 @@ class AppointmentService:
         # Заблокированный пользователь не должен создавать записи ни в тестах, ни в проде.
         try:
             if self._appointment_repo.is_user_blocked(dto.user_id):
-                from src.domain.exceptions.appointment import BlacklistedUserError
                 raise BlacklistedUserError(dto.user_id)
         except AttributeError:
             # Если метод не реализован в моке — пропускаем (обратная совместимость)
@@ -149,15 +144,11 @@ class AppointmentService:
 
         active_count = self._appointment_repo.count_active_by_user_id(dto.user_id)
         if active_count >= self._max_per_user:
-            from src.domain.exceptions.appointment import MaxAppointmentsReachedError
-
             raise MaxAppointmentsReachedError(self._max_per_user)
 
         # Попытка забронировать слот через ScheduleRepository (интерфейс)
         booked = self._schedule_repo.book_slot(dto.date, dto.time)
         if not booked:
-            from src.domain.exceptions.appointment import SlotAlreadyBookedError
-
             raise SlotAlreadyBookedError(dto.date, dto.time)
 
         # Создаём объект и сохраняем через репозиторий

@@ -10,6 +10,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, BufferedInputFile
 
 from src.config.dependencies import Container
+from src.domain.exceptions.appointment import (
+    AppointmentNotFoundError,
+    AppointmentAlreadyCancelledError,
+)
 from src.domain.enums.fsm_states import AdminFSM
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.admin import AdminKeyboard
@@ -157,10 +161,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         appt_id = int(callback.data.split(":")[1])
         import asyncio
-        from src.domain.exceptions.appointment import (
-            AppointmentNotFoundError as _ApptNotFoundError,
-            AppointmentAlreadyCancelledError as _ApptAlreadyCancelledError,  # FIXED BUG-06
-        )
         appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
         try:
             # FIXED H-03: race condition — между get и cancel клиент мог уже отменить запись.
@@ -183,14 +183,14 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                         "Не удалось уведомить клиента user_id=%s об отмене: %s",
                         appt.user_id, notify_exc,
                     )
-        except _ApptAlreadyCancelledError:
+        except AppointmentAlreadyCancelledError:
             # FIXED BUG-06: запись найдена, но уже отменена — корректное семантическое сообщение
             logger.warning("admin_confirm_cancel: appointment #%s is already cancelled", appt_id)
             await callback.message.edit_text(
                 "ℹ️ Эта запись уже была отменена ранее.",
                 reply_markup=None,
             )
-        except _ApptNotFoundError:
+        except AppointmentNotFoundError:
             # FIXED H-03: запись не найдена (race condition или неверный ID)
             logger.warning("admin_confirm_cancel: appointment #%s not found (race condition)", appt_id)
             await callback.message.edit_text(
@@ -375,7 +375,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             # FIXED MED-04: проверяем, не забронирован ли слот перед удалением.
             # Ранее delete_time_slot тихо возвращал False без объяснения причины.
             # Теперь администратор получает понятное сообщение.
-            all_slots = await asyncio.to_thread(sched_service._schedule_repo.get_all_slots, date_str)
+            # FIXED BUG-H2: используем публичный API сервиса вместо обращения к приватному _schedule_repo
+            all_slots = await asyncio.to_thread(sched_service.get_all_slots, date_str)
             booked_slot = next((s for s in all_slots if s.time == time_str and s.is_booked), None)
             if booked_slot:
                 await callback.answer(

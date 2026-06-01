@@ -6,6 +6,7 @@ src/application/services/schedule_service.py — Сервис расписани
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import date as _date
@@ -231,7 +232,6 @@ class ScheduleService:
         
         FIXED: обвёрнут синхронный SQL-запрос в asyncio.to_thread чтобы не блокировать event loop.
         """
-        import asyncio
         result = await asyncio.to_thread(
             self.get_available_dates,
             from_date=_date.today(),
@@ -244,7 +244,6 @@ class ScheduleService:
         
         FIXED: обвёрнут синхронный SQL-запрос в asyncio.to_thread чтобы не блокировать event loop.
         """
-        import asyncio
         return await asyncio.to_thread(self._schedule_repo.get_free_slots, date_str)
 
     def get_workday_templates(self) -> list[dict]:
@@ -277,7 +276,6 @@ class ScheduleService:
         FIXED M-02: обвёрнут в asyncio.to_thread — get_nearest_free_slots выполняет
         N синхронных SQL-запросов и блокировал event loop при большом horizon.
         """
-        import asyncio
         return await asyncio.to_thread(self.get_nearest_free_slots, limit)
 
     async def join_waitlist(self, user_id: int, date: str) -> bool:
@@ -286,7 +284,6 @@ class ScheduleService:
         FIXED C-02: обёрнут синхронный SQLite-вызов в asyncio.to_thread,
         чтобы не блокировать event loop на время выполнения транзакции.
         """
-        import asyncio
         return await asyncio.to_thread(self._schedule_repo.join_waitlist, user_id, date)
 
     # FIXED M-10: добавлен метод для вывода ближайших свободных слотов без открытия календаря и поддержка waitlist.
@@ -312,7 +309,6 @@ class ScheduleService:
         FIXED C-03: обёрнут синхронный SQLite-вызов в asyncio.to_thread,
         чтобы не блокировать event loop.
         """
-        import asyncio
         return await asyncio.to_thread(self._schedule_repo.get_all_slots, date_str)
 
     async def add_slot(self, date_str: str, time_str: str) -> bool:
@@ -333,7 +329,6 @@ class ScheduleService:
 
         FIXED: обёрнут синхронный SQLite-вызов в asyncio.to_thread.
         """
-        import asyncio
         return await asyncio.to_thread(self._schedule_repo.delete_time_slot, date_str, time_str)
 
     async def toggle_working_day(self, date_str: str) -> bool:
