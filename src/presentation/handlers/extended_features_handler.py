@@ -106,6 +106,14 @@ def setup_extended_features_router(container: Container) -> Router:
         date_str = callback.data.split(":")[1]
         data = await state.get_data()
 
+        # FIXED БАГ-СРЕД-05: проверяем что выбранная дата не совпадает с текущей датой записи.
+        # Без этого пользователь мог "перенести" запись на тот же день и то же время.
+        if date_str == data.get("transfer_old_date"):
+            await callback.answer(
+                "⚠️ Выберите другую дату, отличную от текущей записи.", show_alert=True
+            )
+            return
+
         # Получаем доступные времена на новую дату
         # FIXED BUG 2: метод get_available_times не существует, используем get_available_slots
         slots = await sched_service.get_available_slots(date_str)
@@ -286,17 +294,22 @@ def setup_extended_features_router(container: Container) -> Router:
         """Показывает историю посещений для введённого клиента.
 
         FIXED: фича #14 — история посещений с полной статистикой.
+        FIXED БАГ-КРИТ-01: используем отдельное состояние waiting_for_history_query
+        вместо waiting_for_search_query, чтобы не конфликтовать с admin_find_client_query.
         """
-        await state.set_state(AdminFSM.waiting_for_search_query)
+        # FIXED БАГ-КРИТ-01: отдельное FSM-состояние для истории
+        await state.set_state(AdminFSM.waiting_for_history_query)
         await callback.message.answer(
             "🔍 Введите <b>имя</b> или <b>номер телефона</b> клиента для просмотра истории:"
         )
         await callback.answer()
 
-    @router.message(AdminFSM.waiting_for_search_query)
+    # FIXED БАГ-КРИТ-01: хендлер слушает waiting_for_history_query, а не waiting_for_search_query
+    @router.message(AdminFSM.waiting_for_history_query)
     async def admin_search_client_history(message: Message, state: FSMContext) -> None:
         """Ищет клиента и выводит его историю посещений."""
         import asyncio
+        from html import escape  # FIXED БАГ-ВЫСОК-07: HTML-экранирование пользовательских данных
 
         query = message.text.strip()
         if not query or len(query) < 2:
@@ -314,32 +327,42 @@ def setup_extended_features_router(container: Container) -> Router:
             return
 
         if not results:
-            await message.answer(f"ℹ️ Клиент '{query}' не найден")
+            await message.answer(f"ℹ️ Клиент '{escape(query)}' не найден")
             await state.clear()
             return
+
+        # FIXED БАГ-ВЫСОК-03: ограничение результатов до 10 для предотвращения превышения лимита Telegram
+        total_results = len(results)
+        results = results[:10]
 
         # Берём первого найденного клиента для получения истории
         user_id = results[0].user_id
         history = await asyncio.to_thread(appt_service.get_client_visit_history, user_id)
 
+        # FIXED БАГ-ВЫСОК-07: экранируем все пользовательские данные через html.escape()
         text = (
             f"📋 <b>История посещений</b>\n\n"
-            f"👤 Клиент: <b>{results[0].client_name}</b>\n"
-            f"📱 Телефон: <b>{results[0].phone}</b>\n\n"
+            f"👤 Клиент: <b>{escape(results[0].client_name)}</b>\n"
+            f"📱 Телефон: <b>{escape(results[0].phone)}</b>\n\n"
             f"📊 <b>Статистика:</b>\n"
             f"  • Всего посещений: <b>{history.get('total_visits', 0)}</b>\n"
             f"  • Завершено: <b>{history.get('completed', 0)}</b>\n"
             f"  • Отменено: <b>{history.get('cancelled', 0)}</b>\n"
-            f"  • Последний визит: <b>{history.get('last_visit_date', 'N/A')}</b>\n"
-            f"  • Последнее завершённое: <b>{history.get('last_completed_date', 'N/A')}</b>\n\n"
+            f"  • Последний визит: <b>{escape(str(history.get('last_visit_date', 'N/A')))}</b>\n"
+            f"  • Последнее завершённое: <b>{escape(str(history.get('last_completed_date', 'N/A')))}</b>\n\n"
             f"📝 <b>Все записи:</b>\n"
         )
 
         for appt in results:
             status = "✅" if not appt.is_cancelled else "❌"
-            text += f"{status} {appt.date} {appt.time} — {appt.service or 'услуга'}\n"
+            # FIXED БАГ-ВЫСОК-07: экранируем дату, время и услугу
+            text += f"{status} {escape(appt.date)} {escape(appt.time)} — {escape(appt.service or 'услуга')}\n"
 
-        await message.answer(text)
+        # FIXED БАГ-ВЫСОК-03: показываем счётчик если результатов больше 10
+        if total_results > 10:
+            text += f"\n📊 <i>Показано 10 из {total_results} записей. Уточните запрос.</i>"
+
+        await message.answer(text, parse_mode="HTML")
         await state.clear()
 
     # ── #23 Статистика по месяцам в admin-панели ───────────────────────────
@@ -503,7 +526,9 @@ def setup_extended_features_router(container: Container) -> Router:
             return
 
         try:
-            await asyncio.to_thread(lambda: sched_service._schedule_repo.delete_workday_template(tmpl_id))
+            # FIXED БАГ-КРИТ-03: используем публичный метод сервиса вместо прямого обращения
+            # к приватному атрибуту sched_service._schedule_repo (нарушение DDD-архитектуры).
+            await asyncio.to_thread(lambda: sched_service.delete_workday_template(tmpl_id))
             await callback.answer("✅ Шаблон удалён", show_alert=True)
             await callback.message.edit_text("✅ <b>Шаблон успешно удалён</b>")
         except Exception as exc:

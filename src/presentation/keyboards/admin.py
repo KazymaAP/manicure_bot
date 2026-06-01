@@ -42,6 +42,12 @@ class AdminKeyboard:
             KeyboardButton(text="🛑 Черный список"),
         )
         builder.row(
+            # FIXED БАГ-КРИТ-04: добавлена кнопка "🚫 Отменить все на дату" в главное меню админа.
+            # Ранее хендлер был, но кнопки в меню не было — "мёртвый код".
+            # Теперь используем inline-вариант (callback admin_cancel_all_date) из extended_features_handler.
+            KeyboardButton(text="🚫 Массовая отмена"),
+        )
+        builder.row(
             KeyboardButton(text="🏠 Главное меню"),
         )
         return builder.as_markup(resize_keyboard=True, one_time_keyboard=False)
@@ -201,6 +207,11 @@ class AdminKeyboard:
         builder.row(
             InlineKeyboardButton(text="📋 Все активные", callback_data="admin_filter:active"),
             InlineKeyboardButton(text="🗂 Все", callback_data="admin_filter:all"),
+        )
+        # FIXED БАГ-СРЕД-04: добавлена кнопка "📊 Статистика по месяцам" в меню фильтров.
+        # Хендлер admin_show_monthly_stats был реализован, но кнопка отсутствовала.
+        builder.row(
+            InlineKeyboardButton(text="📊 Статистика по месяцам", callback_data="admin_monthly_stats"),
         )
         builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_main"))
         return builder.as_markup()

@@ -658,13 +658,25 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
         q = message.text.strip()
+        # FIXED БАГ-ВЫСОК-01: проверка минимальной длины поискового запроса.
+        # Запрос из 1 символа создаёт широкий LIKE '%а%' — аналог полной выгрузки БД.
+        if len(q) < 2:
+            await message.answer("⚠️ Минимальная длина поискового запроса — 2 символа. Введите ещё раз:")
+            return
         import asyncio
         results = await asyncio.to_thread(appt_service.search_appointments_by_client, q)
         if not results:
             await message.answer("Клиент не найден.")
             await state.clear()
             return
-        await message.answer(MessageFormatter.admin_appointments_list(results, filter_name=f"по запросу {q}"), parse_mode="HTML")
+        # FIXED БАГ-ВЫСОК-03: ограничиваем вывод до 10 результатов для предотвращения
+        # превышения лимита Telegram (4096 символов) при большой базе клиентов.
+        total = len(results)
+        results = results[:10]
+        text = MessageFormatter.admin_appointments_list(results, filter_name=f"по запросу «{q}»")
+        if total > 10:
+            text += f"\n\n📊 <i>Показано 10 из {total} результатов. Уточните запрос.</i>"
+        await message.answer(text, parse_mode="HTML")
         await state.clear()
 
     # ── Админ: черный список ─────────────────────────────────────────────
@@ -745,59 +757,28 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await state.clear()
 
     # ── Админ: отмена всех записей на день (экстренная) ──────────────────
-    @router.message(F.text == "🚫 Отменить все записи на дату")
-    async def admin_cancel_all_start(message: Message, state: FSMContext) -> None:
+    # FIXED БАГ-КРИТ-04: убран дублирующий FSM-поток подтверждения. Вместо двух несвязанных потоков
+    # (один через reply-кнопку+FSM, другой через inline callback) теперь reply-кнопка
+    # "🚫 Массовая отмена" просто открывает inline-меню из extended_features_handler.
+    # Это устраняет путаницу с двумя состояниями confirming_cancel_all и confirming_cancel_all_date.
+    @router.message(F.text == "🚫 Массовая отмена")
+    async def admin_cancel_all_menu(message: Message, state: FSMContext) -> None:
+        """Открывает меню массовой отмены записей через inline-кнопки."""
         if not _is_admin(message.from_user.id):
             return
-        await state.set_state(AdminFSM.confirming_cancel_all)
-        await message.answer("Введите дату YYYY-MM-DD для массовой отмены:", reply_markup=AdminKeyboard.cancel())
-
-    @router.message(AdminFSM.confirming_cancel_all, F.text)
-    async def admin_cancel_all_execute(message: Message, state: FSMContext) -> None:
-        if message.text.strip() == "❌ Отмена":
-            await state.clear()
-            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
-            return
-        date_str = message.text.strip()
-        # FIXED BUG-H5: добавлена валидация формата даты перед массовой отменой.
-        # Без валидации ввод типа "завтра" или "2024/01/15" не вызывал ошибки —
-        # SQL просто возвращал пустой список, что вводило администратора в заблуждение.
-        import re as _re
-        from datetime import datetime as _dt_validate
-        if not _re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
-            await message.answer(
-                "❌ Неверный формат даты. Введите дату в формате <b>ГГГГ-ММ-ДД</b> (например: 2025-07-15).",
-                parse_mode="HTML",
-            )
-            return
-        try:
-            _dt_validate.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
-            await message.answer(
-                "❌ Некорректная дата. Убедитесь, что дата существует (например: 2025-02-30 — нет такой).",
-                parse_mode="HTML",
-            )
-            return
-        import asyncio
-        try:
-            # Отменяем все записи на дату и уведомляем клиентов
-            appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
-            count = 0
-            for a in appts:
-                if a.id is None:
-                    continue
-                try:
-                    await asyncio.to_thread(appt_service.admin_cancel_appointment, a.id)
-                    await notif_service.notify_client_cancellation_by_admin(a.user_id, a.date, a.time)
-                    count += 1
-                except Exception:
-                    logger.exception("Failed to cancel appointment %s", a.id)
-            await message.answer(f"Отменено записей: {count}")
-        except Exception:
-            logger.exception("Failed to cancel all appointments on %s", date_str)
-            await message.answer(MessageFormatter.error_general())
-        finally:
-            await state.clear()
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="🚫 Отменить все записи на дату",
+                    callback_data="admin_cancel_all_date"
+                )
+            ]]
+        )
+        await message.answer(
+            "📅 Выберите действие для массовой отмены записей:",
+            reply_markup=kb,
+        )
 
     # ── Навигация назад ───────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_back_main")

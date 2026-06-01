@@ -124,6 +124,15 @@ class AppointmentService:
                     "Booking created: id=%s user_id=%s date=%s time=%s",
                     appointment_id, dto.user_id, dto.date, dto.time,
                 )
+                # FIXED БАГ-СРЕД-03: после успешного бронирования удаляем пользователя из waitlist.
+                # Если пользователь был в листе ожидания на несколько дат — его записи накапливались
+                # в таблице waitlist бесконечно, засоряя БД.
+                try:
+                    conn.execute("DELETE FROM waitlist WHERE user_id = ?", (dto.user_id,))
+                    logger.debug("Waitlist entries cleared for user_id=%s after booking", dto.user_id)
+                except Exception as wl_exc:
+                    # Не критично — только логируем, запись уже создана
+                    logger.warning("Failed to clear waitlist for user %s: %s", dto.user_id, wl_exc)
                 return BookingResultDTO(
                     appointment_id=appointment_id,
                     client_name=dto.client_name,
@@ -449,3 +458,17 @@ class AppointmentService:
             True если пользователь в чёрном списке.
         """
         return self._appointment_repo.is_user_blocked(user_id)
+
+    def delete_appointments_by_ids(self, appointment_ids: list[int]) -> int:
+        """Удаляет записи по списку ID (используется при архивировании).
+
+        FIXED БАГ-ВЫСОК-04: метод для реального удаления архивируемых записей из БД.
+
+        Args:
+            appointment_ids: Список ID записей для удаления.
+
+        Returns:
+            Количество удалённых записей.
+        """
+        return self._appointment_repo.delete_by_ids(appointment_ids)
+

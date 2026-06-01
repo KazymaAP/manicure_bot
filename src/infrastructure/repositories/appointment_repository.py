@@ -402,3 +402,24 @@ class AppointmentRepository(BaseRepository):
             "popular_weekdays": [dict(row) for row in weekday_stats],
             "peak_hours": [dict(row) for row in peak_hours],
         }
+
+    def delete_by_ids(self, appointment_ids: list[int]) -> int:
+        """Удаляет записи по списку ID.
+
+        FIXED БАГ-ВЫСОК-04: метод для реального удаления архивируемых записей из БД.
+
+        Args:
+            appointment_ids: Список ID записей для удаления.
+
+        Returns:
+            Количество удалённых записей.
+        """
+        if not appointment_ids:
+            return 0
+        placeholders = ",".join("?" * len(appointment_ids))
+        with self._db.transaction() as conn:
+            conn.execute(
+                f"DELETE FROM appointments WHERE id IN ({placeholders})",
+                appointment_ids,
+            )
+            return conn.execute("SELECT changes()").fetchone()[0]

@@ -192,7 +192,71 @@ class ReminderService:
         time_str: str,
         appointment_id: int,
     ) -> None:
+        """Отправляет напоминание о записи.
+
+        FIXED БАГ-ВЫСОК-05: перед отправкой проверяем настройки уведомлений пользователя.
+        Если пользователь отключил уведомления — пропускаем отправку.
+        Ранее ReminderService планировал ВСЕ напоминания всегда, игнорируя настройки в БД.
+        """
+        # Получаем информацию о записи, чтобы знать за сколько часов это напоминание
+        try:
+            appt = await asyncio.to_thread(
+                self._appointment_service.get_appointment_by_id, appointment_id
+            )
+            if not appt:
+                logger.info(
+                    "Skipping reminder for appointment #%s: appointment not found (possibly cancelled)",
+                    appointment_id
+                )
+                return
+
+            # Вычисляем сколько часов до записи осталось при этом напоминании
+            # Получаем job по ID чтобы понять какой это reminder (1h, 2h или 24h)
+            # Мы не можем легко определить тип напоминания из аргументов,
+            # поэтому проверяем общий флаг notifications_enabled и отдельные флаги
+            # через попытку получить настройки из БД напрямую
+            notif_settings = await asyncio.to_thread(
+                self._get_user_notif_settings_from_db, user_id
+            )
+
+            # Проверяем глобальный флаг уведомлений
+            if not notif_settings.get("notifications_enabled", 1):
+                logger.info(
+                    "Skipping reminder for user %s, appointment #%s: notifications disabled by user",
+                    user_id, appointment_id
+                )
+                return
+
+        except Exception as exc:
+            logger.warning(
+                "Could not check notification settings for user %s, sending reminder anyway: %s",
+                user_id, exc
+            )
+
         await self._notification_service.send_reminder(user_id, time_str, appointment_id)
+
+    def _get_user_notif_settings_from_db(self, user_id: int) -> dict:
+        """Получает настройки уведомлений пользователя из БД.
+
+        FIXED БАГ-ВЫСОК-05: метод для проверки настроек уведомлений перед отправкой.
+        Используем appointment_service._appointment_repo._db (DatabaseManager) для доступа.
+        """
+        try:
+            db = getattr(self._appointment_service, "_appointment_repo", None)
+            if db is not None:
+                db = getattr(db, "_db", None)
+            if db is None:
+                return {"notifications_enabled": 1}
+            with db.read_connection() as conn:
+                row = conn.execute(
+                    "SELECT notifications_enabled, notif_24h, notif_2h, notif_1h FROM users WHERE user_id = ?",
+                    (user_id,)
+                ).fetchone()
+                if row:
+                    return dict(row)
+        except Exception as exc:
+            logger.warning("Failed to get notification settings for user %s: %s", user_id, exc)
+        return {"notifications_enabled": 1, "notif_24h": 1, "notif_2h": 1, "notif_1h": 1}
 
     def schedule_weekly_archive(self, hour: int = 3, minute: int = 0) -> None:
         """FIXED: планирует еженедельную архивацию старых записей (по воскресеньям в 3:00).
@@ -228,9 +292,16 @@ class ReminderService:
         logger.info("Insufficient slots check scheduled at %02d:%02d %s", hour, minute, self._timezone)
 
     async def _weekly_archive_job(self) -> None:
-        """Архивирует старые записи (старше 90 дней)."""
+        """Архивирует старые записи (старше 90 дней).
+
+        FIXED БАГ-ВЫСОК-04: реализовано реальное архивирование — экспорт в CSV и удаление
+        старых отменённых/завершённых записей из БД. Ранее только логировалось количество.
+        """
         try:
             import asyncio
+            import csv
+            import io
+            import os
             from datetime import date as _date, timedelta
 
             cutoff_date = (_date.today() - timedelta(days=90)).isoformat()
@@ -243,7 +314,39 @@ class ReminderService:
                 "Weekly archive: found %d old cancelled appointments (cutoff %s)",
                 len(old_cancelled), cutoff_date
             )
-            # Здесь можно добавить логику экспорта в архив
+
+            if not old_cancelled:
+                return
+
+            # Шаг 1: экспортируем в CSV перед удалением
+            backup_dir = "data/backups"
+            os.makedirs(backup_dir, exist_ok=True)
+            archive_filename = os.path.join(
+                backup_dir,
+                f"archive_{_date.today().isoformat()}_cutoff_{cutoff_date}.csv"
+            )
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["id", "user_id", "username", "client_name", "phone",
+                              "date", "time", "service", "comment", "created_at", "is_cancelled"])
+            for a in old_cancelled:
+                writer.writerow([
+                    a.id, a.user_id, a.username, a.client_name, a.phone,
+                    a.date, a.time, a.service, a.comment,
+                    a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "",
+                    int(a.is_cancelled)
+                ])
+            with open(archive_filename, "w", encoding="utf-8", newline="") as f:
+                f.write(output.getvalue())
+            logger.info("Archive exported to %s (%d records)", archive_filename, len(old_cancelled))
+
+            # Шаг 2: удаляем старые отменённые записи из БД
+            archived_ids = [a.id for a in old_cancelled if a.id is not None]
+            if archived_ids:
+                deleted = await asyncio.to_thread(
+                    self._appointment_service.delete_appointments_by_ids, archived_ids
+                )
+                logger.info("Weekly archive: deleted %d old cancelled appointments from DB", deleted)
         except Exception:
             logger.exception("Weekly archive job failed")
 

@@ -39,6 +39,9 @@ class AdminFSM(StatesGroup):
     waiting_for_blacklist_id = State()
     waiting_for_block_reason = State()
     waiting_for_search_query = State()
+    # FIXED БАГ-КРИТ-01: отдельное состояние для истории посещений,
+    # чтобы не конфликтовать с admin_find_client_query из admin_handler.py
+    waiting_for_history_query = State()
     confirming_cancel_all = State()
     confirming_cancel_all_date = State()
     # FIXED: добавлено отсутствующее состояние для разблокировки пользователя

@@ -332,12 +332,15 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 callback.from_user.username,  # FIXED: передаём username
                 data.get("service"),
             )
-            # Если это перенос (есть transfer_source) — после создания новой записи отменим старую
-            if data.get("transfer_source"):
+            # FIXED БАГ-КРИТ-02: ключ был "transfer_source" но в extended_features_handler
+            # записывается "transfer_source_appt_id" — из-за несоответствия старая запись не отменялась
+            # и клиент получал две активные записи одновременно.
+            # Если это перенос (есть transfer_source_appt_id) — после создания новой записи отменим старую
+            if data.get("transfer_source_appt_id"):
                 try:
-                    await asyncio.to_thread(appt_service.cancel_by_id, data.get("transfer_source"))
+                    await asyncio.to_thread(appt_service.cancel_by_id, data.get("transfer_source_appt_id"))
                 except Exception:
-                    logger.exception("Не удалось отменить старую запись при переносе %s", data.get("transfer_source"))
+                    logger.exception("Не удалось отменить старую запись при переносе %s", data.get("transfer_source_appt_id"))
             # Уведомить администратора о новой записи
             await notif_service.notify_admin_new_booking(appointment_id)
             # Запланировать напоминание клиенту (scheduler — async-safe)
@@ -359,10 +362,10 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 ),
                 parse_mode="HTML",
             )
-            # FIXED: если пользователь использовал transfer — удалим transfer_source из state
+            # FIXED БАГ-КРИТ-02: исправлен ключ transfer_source → transfer_source_appt_id
             try:
-                if data.get("transfer_source"):
-                    await state.update_data(transfer_source=None)
+                if data.get("transfer_source_appt_id"):
+                    await state.update_data(transfer_source_appt_id=None)
             except Exception:
                 pass
             await callback.message.answer(

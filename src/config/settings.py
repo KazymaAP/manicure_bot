@@ -163,13 +163,17 @@ class Settings(BaseSettings):
     )
 
     # ─── Webhook (фича #40) ──────────────────────────────────
+    # FIXED БАГ-ВЫСОК-08: webhook не реализован в main.py (удалён как мёртвый код).
+    # Поля оставлены для обратной совместимости, но игнорируются при запуске.
+    # Бот работает ТОЛЬКО в режиме long polling. WEBHOOK_URL в .env не работает.
+    # @deprecated: будут удалены в следующей версии
     webhook_url: str | None = Field(
         default=None,
-        description="URL для webhook (если используется вместо polling)",
+        description="[DEPRECATED] Webhook не реализован. Бот работает только в polling-режиме.",
     )
     webhook_port: int = Field(
         default=8443,
-        description="Порт для webhook сервера",
+        description="[DEPRECATED] Webhook не реализован. Это поле игнорируется.",
     )
 
     # ─── Временная зона (FIXED) ───────────────────────────────

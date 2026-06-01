@@ -254,6 +254,14 @@ class ScheduleService:
         """Сохраняет шаблон рабочих дней."""
         return self._schedule_repo.save_workday_template(name, schedule)
 
+    def delete_workday_template(self, template_id: int) -> None:
+        """Удаляет шаблон рабочих дней по ID.
+
+        FIXED БАГ-КРИТ-03: добавлен публичный метод, чтобы хендлер не обращался напрямую
+        к приватному _schedule_repo (нарушение DDD/инкапсуляции).
+        """
+        self._schedule_repo.delete_workday_template(template_id)
+
     def get_nearest_free_slots(self, limit: int = 5) -> list[tuple[str, str]]:
         """Возвращает ближайшие свободные слоты (date, time) в пределах horizon."""
         from datetime import date as _date, timedelta

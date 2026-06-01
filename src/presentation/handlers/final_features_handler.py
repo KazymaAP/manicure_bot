@@ -29,6 +29,8 @@ def setup_final_features_router(container: Container) -> Router:
     sched_service = container.schedule_service
     notif_service = container.notification_service
     settings = container.settings
+    # FIXED БАГ-КРИТ-05: получаем db (DatabaseManager) из container вместо сырого sqlite3.connect()
+    db = container.db
 
     # ═══════════════════════════════════════════════════════════════════════
     # КОМАНДЫ И КНОПКИ
@@ -203,36 +205,42 @@ def setup_final_features_router(container: Container) -> Router:
         )
 
     def _get_user_notif_settings(user_id: int) -> dict:
-        """Получает настройки уведомлений пользователя из БД."""
+        """Получает настройки уведомлений пользователя из БД.
+
+        FIXED БАГ-КРИТ-05: используем db (DatabaseManager) из замыкания вместо
+        сырого sqlite3.connect(settings.db_path). Это обеспечивает:
+        - использование WAL-режима и PRAGMA-оптимизаций
+        - корректное управление соединением (нет утечек)
+        - единообразную обработку ошибок
+        """
         try:
-            db = settings.db_path
-            import sqlite3
-            conn = sqlite3.connect(db)
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT notifications_enabled, notif_24h, notif_2h, notif_1h FROM users WHERE user_id = ?",
-                (user_id,)
-            ).fetchone()
-            conn.close()
-            if row:
-                return dict(row)
+            with db.read_connection() as conn:
+                row = conn.execute(
+                    "SELECT notifications_enabled, notif_24h, notif_2h, notif_1h FROM users WHERE user_id = ?",
+                    (user_id,)
+                ).fetchone()
+                if row:
+                    return dict(row)
         except Exception:
             pass
         return {"notifications_enabled": 1, "notif_24h": 1, "notif_2h": 1, "notif_1h": 1}
 
     def _update_user_notif(user_id: int, **kwargs) -> None:
-        """Обновляет настройки уведомлений пользователя в БД."""
+        """Обновляет настройки уведомлений пользователя в БД.
+
+        FIXED БАГ-КРИТ-05: используем db.transaction() из замыкания вместо
+        сырого sqlite3.connect(). Теперь соединение всегда закрывается корректно
+        (transaction() — контекстный менеджер), commit происходит автоматически,
+        rollback — при ошибке.
+        """
         try:
-            import sqlite3
-            conn = sqlite3.connect(settings.db_path)
-            for col, val in kwargs.items():
-                conn.execute(
-                    f"INSERT INTO users (user_id, {col}) VALUES (?, ?) "
-                    f"ON CONFLICT(user_id) DO UPDATE SET {col} = excluded.{col}",
-                    (user_id, val)
-                )
-            conn.commit()
-            conn.close()
+            with db.transaction() as conn:
+                for col, val in kwargs.items():
+                    conn.execute(
+                        f"INSERT INTO users (user_id, {col}) VALUES (?, ?) "
+                        f"ON CONFLICT(user_id) DO UPDATE SET {col} = excluded.{col}",
+                        (user_id, val)
+                    )
         except Exception as exc:
             logger.error("Failed to update notification settings for user %s: %s", user_id, exc)
 
@@ -304,28 +312,64 @@ def setup_final_features_router(container: Container) -> Router:
 
     # ── #38 Архивирование старых записей ───────────────────────────────────
     async def archive_old_appointments() -> None:
-        """FIXED L-02: фича #38 — автоудаление/архивирование записей старше 90 дней.
+        """FIXED БАГ-ВЫСОК-04: фича #38 — реальное архивирование записей старше 90 дней.
+
+        Теперь:
+        1. Экспортирует старые отменённые/завершённые записи в CSV (backup_dir/archive_*.csv)
+        2. Удаляет их из БД
 
         ВАЖНО: эта функция регистрируется в APScheduler при вызове register_scheduled_jobs().
         """
         import asyncio
+        import csv
+        import io
+        import os
 
         try:
             cutoff_date = (datetime.now() - timedelta(days=90)).date().isoformat()
 
-            # Получаем старые отменённые и завершённые записи
+            # Получаем старые отменённые записи
             all_appts = await asyncio.to_thread(appt_service.get_all)
             old_appts = [
-                a
-                for a in all_appts
-                if (a.date < cutoff_date and a.is_cancelled) or (a.date < cutoff_date and a.date < _date.today().isoformat())
+                a for a in all_appts
+                if a.date < cutoff_date and a.is_cancelled
             ]
 
-            if old_appts:
-                # Можем сделать резервную копию перед удалением
-                logger.info("Archiving %d old appointments", len(old_appts))
-                # Здесь можно добавить логику экспорта в архив перед удалением
-                # Для простоты просто логируем
+            if not old_appts:
+                logger.info("archive_old_appointments: nothing to archive (cutoff %s)", cutoff_date)
+                return
+
+            logger.info("Archiving %d old cancelled appointments (cutoff %s)", len(old_appts), cutoff_date)
+
+            # Шаг 1: экспортируем в CSV перед удалением
+            backup_dir = "data/backups"
+            os.makedirs(backup_dir, exist_ok=True)
+            from datetime import date as _date2
+            archive_filename = os.path.join(
+                backup_dir,
+                f"archive_{_date2.today().isoformat()}_cutoff_{cutoff_date}.csv"
+            )
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["id", "user_id", "username", "client_name", "phone",
+                              "date", "time", "service", "comment", "created_at", "is_cancelled"])
+            for a in old_appts:
+                writer.writerow([
+                    a.id, a.user_id, a.username, a.client_name, a.phone,
+                    a.date, a.time, a.service, a.comment,
+                    a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "",
+                    int(a.is_cancelled)
+                ])
+            with open(archive_filename, "w", encoding="utf-8", newline="") as f:
+                f.write(output.getvalue())
+            logger.info("Archive exported: %s (%d records)", archive_filename, len(old_appts))
+
+            # Шаг 2: удаляем из БД
+            ids_to_delete = [a.id for a in old_appts if a.id is not None]
+            if ids_to_delete:
+                deleted = await asyncio.to_thread(appt_service.delete_appointments_by_ids, ids_to_delete)
+                logger.info("archive_old_appointments: deleted %d records from DB", deleted)
+
         except Exception as exc:
             logger.exception("Archive job failed: %s", exc)
 
