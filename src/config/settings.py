@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import ConfigDict, Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -214,7 +214,7 @@ class Settings(BaseSettings):
                 raise ValueError(f"Time slot out of range: {slot!r}")
         return v
 
-    model_config = ConfigDict(
+    model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,

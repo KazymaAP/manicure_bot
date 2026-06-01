@@ -328,7 +328,6 @@ class ReminderService:
         """Отправляет ежедневный дайджест администраторам."""
         try:
             import asyncio
-            from src.presentation.formatters.message_formatter import MessageFormatter
             from datetime import date as _date
 
             stats = await asyncio.to_thread(self._appointment_service.get_statistics)

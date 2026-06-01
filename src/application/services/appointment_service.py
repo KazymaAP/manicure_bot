@@ -10,14 +10,11 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime as _datetime, timedelta
+from typing import Callable
 import sqlite3
 
 from src.application.dto.booking_dto import BookingResultDTO, CreateBookingDTO
-from src.domain.exceptions import (
-    AppointmentAlreadyExistsError,
-    AppointmentNotFoundError,
-    SlotAlreadyBookedError,
-)
+from src.domain.exceptions import AppointmentNotFoundError
 from src.domain.exceptions.appointment import AppointmentAlreadyCancelledError
 from src.domain.models.appointment import Appointment
 from src.infrastructure.repositories.appointment_repository import AppointmentRepository
@@ -39,8 +36,8 @@ class AppointmentService:
         appointment_repo: AppointmentRepository,
         schedule_repo: ScheduleRepository,
         max_per_user: int = 1,
-        service_durations: dict | None = None,
-        notification_callback: callable | None = None,
+        service_durations: dict[str, int] | None = None,
+        notification_callback: Callable[[int, str, str], None] | None = None,
     ) -> None:
         self._appointment_repo = appointment_repo
         self._schedule_repo = schedule_repo
@@ -84,7 +81,6 @@ class AppointmentService:
                     blk_row = conn.execute("SELECT user_id FROM blacklist WHERE user_id = ?", (dto.user_id,)).fetchone()
                     if blk_row:
                         from src.domain.exceptions.appointment import MaxAppointmentsReachedError
-                        from src.domain.exceptions.base import DomainError
                         # FIXED: использует специальное исключение BlacklistedUserError
                         from src.domain.exceptions.appointment import BlacklistedUserError
 
@@ -96,8 +92,9 @@ class AppointmentService:
                 # 3) бронируем слот(ы) с учётом длительности услуги
                 duration = 0
                 try:
-                    if getattr(dto, "service", None):
-                        duration = int(self._service_durations.get(dto.service, 0))
+                    service = getattr(dto, "service", None)
+                    if service is not None:
+                        duration = int(self._service_durations.get(service, 0))
                 except Exception:
                     duration = 0
 

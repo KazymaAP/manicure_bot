@@ -8,7 +8,7 @@ FIXED M-07: CreateBookingDTO теперь валидирует формат date
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

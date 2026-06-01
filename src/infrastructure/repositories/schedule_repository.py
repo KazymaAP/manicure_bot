@@ -299,7 +299,7 @@ class ScheduleRepository(BaseRepository):
         is_booked_flags = {r[0]: r[1] for r in rows}
 
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime
             fmt = "%H:%M"
             start_dt = datetime.strptime(time, fmt)
         except Exception:

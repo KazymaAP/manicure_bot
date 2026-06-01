@@ -142,7 +142,7 @@ async def main() -> None:
         # Для webhook режима нужна отдельная реализация с aiohttp/FastAPI сервером.
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("Бот запущен. Ожидаю обновления…")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())  # type: ignore[arg-type]
     finally:
         # Грамотно останавливаем health server
         if health_server:

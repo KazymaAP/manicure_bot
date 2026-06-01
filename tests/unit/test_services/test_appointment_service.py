@@ -10,7 +10,6 @@ from src.application.dto.booking_dto import CreateBookingDTO
 from src.application.services.appointment_service import AppointmentService
 from src.domain.enums.appointment_status import AppointmentStatus
 from src.domain.exceptions.appointment import (
-    AppointmentAlreadyExistsError,
     MaxAppointmentsReachedError,
     SlotAlreadyBookedError,
 )

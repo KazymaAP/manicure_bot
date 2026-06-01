@@ -460,6 +460,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
     @router.message(AdminFSM.waiting_for_broadcast, F.text)
     async def admin_broadcast_preview(message: Message, state: FSMContext) -> None:
+        if message.text is None:
+            await message.answer(MessageFormatter.error_general())
+            return
         if message.text.strip() == "❌ Отмена":
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
@@ -668,8 +671,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     async def admin_block_user_confirm(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         user_id = data.get("block_user_id")
-        reason = message.text.strip()
-        from datetime import datetime
+        reason = message.text.strip() if message.text else ""
+        if user_id is None:
+            await message.answer(MessageFormatter.error_general())
+            return
         try:
             import asyncio
             # Добавляем пользователя в чёрный список через сервис
@@ -751,6 +756,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
             count = 0
             for a in appts:
+                if a.id is None:
+                    continue
                 try:
                     await asyncio.to_thread(appt_service.admin_cancel_appointment, a.id)
                     await notif_service.notify_client_cancellation_by_admin(a.user_id, a.date, a.time)

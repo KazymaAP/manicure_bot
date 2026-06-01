@@ -267,7 +267,7 @@ class NotificationService:
             # FIXED BUG-05: используем isinstance() с реальным классом aiogram,
             # а не хрупкую проверку по имени класса через строку.
             try:
-                from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+                from aiogram.exceptions import TelegramForbiddenError
                 if isinstance(exc, TelegramForbiddenError):
                     logger.warning(
                         "Cannot send message to chat_id=%s — bot blocked by user: %s. "

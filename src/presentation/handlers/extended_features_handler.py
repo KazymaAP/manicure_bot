@@ -12,7 +12,7 @@ FIXED: обработчики для функций которые ещё не �
 """
 
 import logging
-from datetime import date as _date, datetime, timedelta
+from datetime import date as _date, datetime
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -103,8 +103,6 @@ def setup_extended_features_router(container: Container) -> Router:
     @router.callback_query(BookingFSM.transferring_choosing_date, F.data.startswith("transfer_cal_day:"))
     async def transfer_choose_new_date(callback: CallbackQuery, state: FSMContext) -> None:
         """Выбор новой даты при переносе."""
-        import asyncio
-
         date_str = callback.data.split(":")[1]
         data = await state.get_data()
 
@@ -238,8 +236,6 @@ def setup_extended_features_router(container: Container) -> Router:
 
         FIXED: фича #7 — лист ожидания с автоуведомлением при освобождении слота.
         """
-        import asyncio
-
         date_str = callback.data.split(":")[1]
         user_id = callback.from_user.id
 

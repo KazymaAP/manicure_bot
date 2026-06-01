@@ -5,7 +5,6 @@ FIXED: Резервные копии SQLite с ротацией (хранить 
 """
 import logging
 import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 

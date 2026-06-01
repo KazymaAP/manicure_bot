@@ -9,14 +9,11 @@ FIXED: все оставшиеся функции:
 - Inline режим для поиска дат (фича #36)
 """
 
-import asyncio  # FIXED: отсутствовал import asyncio на уровне модуля
 import logging
 from datetime import date as _date, datetime, timedelta
-import csv
-from io import StringIO
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
+from aiogram.types import Message, CallbackQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 from src.config.dependencies import Container
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
@@ -154,9 +151,13 @@ def setup_final_features_router(container: Container) -> Router:
     @router.message(F.text == "📤 Поделиться")
     async def share_bot(message: Message) -> None:
         """FIXED: фича #19 — готовая ссылка для реферального распространения."""
-        bot_username = (await message.bot.get_me()).username
-        text = MessageFormatter.share_bot_link(bot_username)
-        await message.answer(text)
+        bot_info = await message.bot.get_me()
+        bot_username = bot_info.username if bot_info else None
+        if bot_username:
+            text = MessageFormatter.share_bot_link(bot_username)
+            await message.answer(text)
+        else:
+            await message.answer(MessageFormatter.error_general())
 
     # ── #49 Управление уведомлениями ─────────────────────────────────────
     @router.message(F.text == "🔔 Уведомления")
@@ -204,7 +205,6 @@ def setup_final_features_router(container: Container) -> Router:
     def _get_user_notif_settings(user_id: int) -> dict:
         """Получает настройки уведомлений пользователя из БД."""
         try:
-            from src.config.dependencies import Container
             db = settings.db_path
             import sqlite3
             conn = sqlite3.connect(db)
@@ -363,8 +363,6 @@ def setup_final_features_router(container: Container) -> Router:
 
         Использование: @bot_username дата слот1 слот2...
         """
-        import asyncio
-
         query = inline_query.query.strip().lower()
         if not query or len(query) < 4:
             await inline_query.answer([])

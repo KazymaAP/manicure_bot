@@ -6,17 +6,12 @@ from datetime import date as _date, datetime as _datetime  # FIXED MED-03: до�
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import BookingFSM
-from aiogram.types import InlineKeyboardMarkup
 
-from src.domain.exceptions.appointment import (
-    MaxAppointmentsReachedError,
-    SlotAlreadyBookedError,
-)
+from src.domain.exceptions.appointment import SlotAlreadyBookedError
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.handlers.common_handler import _get_portfolio
 from src.presentation.keyboards.booking import BookingKeyboard
