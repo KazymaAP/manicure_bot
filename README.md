@@ -1,339 +1,186 @@
 # 💅 Manicure Bot — Telegram-бот для записи на маникюр
 
-**v4.1.0** — Профессиональный Telegram-бот для мастера маникюра с красивым клиентским интерфейсом и полноценной административной панелью.
+Профессиональный Telegram-бот для онлайн-записи на маникюр с поддержкой администрирования, расписания, напоминаний, бэкапов и мониторинга.
 
-[![CI](https://github.com/KazymaAP/manicure_bot/actions/workflows/ci.yml/badge.svg)](https://github.com/KazymaAP/manicure_bot/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
-
-## ✨ Что умеет бот
+## Возможности
 
 ### Для клиентов
-- 🌸 **Тёплое приветствие** с именем мастера и фото (опционально)
-- 💅 **Простая запись** в 3 шага: выбор услуги → дата → время
-- 📅 **Интерактивный календарь** с подсвеченными доступными датами
-- 🕐 **Слоты времени** — только свободные, кнопками
-- 💰 **Прайс-лист** с ценами и длительностью каждой услуги
-- 📋 **Мои записи** — просмотр, отмена, перенос
-- 🔔 **Напоминания** за 24ч/2ч/1ч до визита с кнопками «Буду!» / «Отменить»
-- 🌷 **Благодарность после визита** + кнопка «Записаться снова»
-- 📞 **Контакты мастера** с кнопкой «Написать»
+- 📅 Запись на услугу через интерактивный календарь
+- 🔄 Перенос записи на другое время
+- 📋 Просмотр активных записей
+- 🔔 Напоминания за 24 часа, 2 часа и 1 час до визита
+- 🕐 Лист ожидания с уведомлением при отмене
+- 💰 Просмотр прайс-листа и расписания
+- 📤 Поделиться ботом
+- 🔕 Управление уведомлениями
 
-### Для администратора (мастера)
-Доступ по команде `/admin` или кнопке «⚙️ Админ-панель»
+### Для администратора
+- 📊 Дашборд с актуальной статистикой
+- 📋 Фильтрация записей (сегодня / неделя / все активные)
+- ✅ Отметка «клиент пришёл» с благодарностью
+- 🗓 Управление расписанием и временными слотами
+- 📝 Шаблоны рабочих дней
+- 🚫 Чёрный список клиентов
+- 📣 Массовая рассылка всем пользователям
+- 💾 Автоматические бэкапы БД с ротацией
+- 📦 Архивирование старых записей
+- 🔍 Поиск клиентов
 
-**6 разделов панели:**
+### Технические возможности
+- 🏥 HTTP health-check сервер (`/health`, `/metrics`)
+- 📈 Ежедневный дайджест статистики
+- ⚡ Rate limiting (защита от флуда)
+- 🔒 Защита токена бота через SecretStr
+- 🌍 Поддержка любого часового пояса
 
-| Раздел | Что можно делать |
-|--------|-----------------|
-| 📅 **Сегодня** | Список клиентов с кнопками «Пришла» / «Отменить» |
-| 📋 **Все записи** | Фильтрация по дате/неделе/всем, статистика |
-| 🗓 **Расписание** | Добавление/удаление слотов, открытие/закрытие дней |
-| 👥 **Клиенты** | Поиск по имени/телефону, история, написать клиенту |
-| ⚙️ **Настройки** | Приветствие, услуги, часы работы, фото — без правки кода |
-| 🚫 **Чёрный список** | Блокировка/разблокировка пользователей |
+## Быстрый старт
 
-**Дополнительно:**
-- 📊 Статистика записей
-- 📢 Рассылка всем клиентам
-- ⬇️ Экспорт в CSV
-- ☀️ Утренний дайджест записей на сегодня (09:00)
-- ⏰ Уведомление за 2 часа до первой записи
+### 1. Клонирование и настройка
 
----
-
-## 🚀 Установка и запуск
-
-### 1. Требования
-- Python 3.10 или выше (рекомендуется 3.12)
-- pip
-
-### 2. Клонирование
 ```bash
-git clone https://github.com/your_repo/manicure_bot.git
+git clone https://github.com/KazymaAP/manicure_bot.git
 cd manicure_bot
-```
-
-### 3. Создание виртуального окружения
-```bash
-python -m venv venv
-source venv/bin/activate      # Linux/Mac
-# или
-venv\Scripts\activate          # Windows
-```
-
-### 4. Установка зависимостей
-```bash
-pip install -r requirements.txt
-```
-
-### 5. Создание Telegram-бота
-1. Откройте [@BotFather](https://t.me/BotFather) в Telegram
-2. Отправьте `/newbot`
-3. Придумайте имя и username бота
-4. Скопируйте токен бота
-
-### 6. Получение своего Telegram ID
-1. Напишите [@userinfobot](https://t.me/userinfobot)
-2. Скопируйте ваш числовой ID
-
-### 7. Настройка конфигурации
-```bash
 cp .env.example .env
-nano .env    # или любой текстовый редактор
 ```
 
-**Минимально необходимые настройки в `.env`:**
-```env
-BOT_TOKEN=ваш_токен_от_BotFather
-ADMIN_IDS=ваш_telegram_id
-TIMEZONE=Europe/Moscow
-```
+### 2. Настройка `.env`
 
-**Пример полной настройки:**
 ```env
+# Обязательные
 BOT_TOKEN=1234567890:ABCDefGhIJKlmnoPQRStuvwXYZ
 ADMIN_IDS=123456789
+
+# Важные
 TIMEZONE=Europe/Moscow
 REMINDER_HOURS_BEFORE=24
+
+# Услуги и прайс
 SERVICES={"Маникюр": {"price": 1200, "duration": 60}, "Педикюр": {"price": 2000, "duration": 90}}
-PHONE=+7 999 123-45-67
-INSTAGRAM=@my_nail_studio
-ADDRESS=г. Москва, ул. Примерная, д. 1
 ```
 
-### 8. Создание директории для БД
+### 3. Запуск
+
+#### Через Docker (рекомендуется)
 ```bash
-mkdir -p data
+docker-compose up -d
 ```
 
-### 9. Запуск бота
+#### Локально
 ```bash
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# .venv\Scripts\activate  # Windows
+pip install -r requirements.txt
 python main.py
 ```
 
-### 10. Первый запуск
-- Откройте бота в Telegram: `https://t.me/ваш_username_бота`
-- Отправьте `/start`
-- Для входа в админ-панель отправьте `/admin`
-
----
-
-## ⚙️ Настройка без правки кода
-
-### Через `.env` файл:
-
-**Изменить прайс-лист:**
-```env
-SERVICES={"Маникюр классический": {"price": 1500, "duration": 60}, "Маникюр с покрытием": {"price": 2000, "duration": 90}}
-```
-
-**Изменить рабочее время:**
-```env
-DEFAULT_TIME_SLOTS=["10:00","11:00","12:00","14:00","15:00","16:00","17:00"]
-```
-
-**Добавить фото приветствия:**
-```env
-WELCOME_PHOTO_URL=https://example.com/your_photo.jpg
-```
-
-### Через админ-панель бота (без перезапуска):
-- **Расписание**: добавляйте/удаляйте слоты прямо в боте
-- **Приветствие**: `/admin` → «⚙️ Настройки» → «✏️ Текст приветствия»
-- **Услуги**: `/admin` → «⚙️ Настройки» → «💅 Услуги и цены»
-
----
-
-## 📂 Структура проекта
+## Структура проекта
 
 ```
 manicure_bot/
-├── main.py                      # Точка входа
-├── config.json                  # Тексты сообщений (настраиваемые)
-├── .env                         # Ваши настройки (не в git!)
-├── .env.example                 # Пример настроек
-├── requirements.txt             # Зависимости
-├── README.md                    # Документация
-├── data/                        # База данных SQLite (создаётся автоматически)
-├── migrations/                  # SQL-миграции
-└── src/
-    ├── application/
-    │   └── services/            # Бизнес-логика
-    ├── domain/                  # Модели и исключения
-    ├── infrastructure/          # БД, репозитории
-    └── presentation/
-        ├── handlers/            # Обработчики команд
-        │   ├── admin_handler.py         # Административная панель
-        │   ├── common_handler.py        # /start, /help, цены, контакты
-        │   ├── user_handler.py          # Запись клиента
-        │   ├── extended_features_handler.py  # Перенос, лист ожидания
-        │   └── final_features_handler.py     # Прочие функции
-        ├── keyboards/           # Клавиатуры
-        └── formatters/          # Форматирование сообщений
+├── src/
+│   ├── application/        # Бизнес-логика
+│   │   ├── dto/            # Data Transfer Objects
+│   │   ├── services/       # Сервисы приложения
+│   │   └── use_cases/
+│   ├── config/             # Конфигурация и DI
+│   ├── domain/             # Доменные модели и исключения
+│   │   ├── enums/
+│   │   ├── exceptions/
+│   │   └── models/
+│   ├── infrastructure/     # Инфраструктурный слой
+│   │   ├── database/       # DatabaseManager (SQLite + WAL)
+│   │   ├── http/           # Health-check сервер
+│   │   └── repositories/  # Репозитории
+│   └── presentation/       # Telegram handlers, keyboards
+│       ├── formatters/
+│       ├── handlers/
+│       ├── keyboards/
+│       └── middlewares/
+├── migrations/             # SQL-миграции
+├── tests/                  # Unit-тесты
+│   └── unit/
+├── .env.example            # Шаблон конфигурации
+├── Dockerfile
+├── docker-compose.yml
+├── main.py                 # Точка входа
+└── requirements.txt
 ```
 
----
+## Конфигурация
 
-## 🐳 Запуск через Docker
+Все настройки задаются через переменные окружения / `.env` файл.
+
+| Переменная | Обязательная | По умолчанию | Описание |
+|---|---|---|---|
+| `BOT_TOKEN` | ✅ | — | Токен от @BotFather |
+| `ADMIN_IDS` | ✅ | — | Telegram ID администраторов (через запятую) |
+| `TIMEZONE` | — | `UTC` | Часовой пояс (`Europe/Moscow`) |
+| `DB_PATH` | — | `data/manicure_bot.db` | Путь к SQLite |
+| `REMINDER_HOURS_BEFORE` | — | `24` | За сколько часов напоминать |
+| `MAX_APPOINTMENTS_PER_USER` | — | `1` | Макс. активных записей у клиента |
+| `SCHEDULE_DAYS_AHEAD` | — | `30` | Горизонт расписания (дней) |
+| `REDIS_URL` | — | — | Redis для FSM (рекомендуется в prod) |
+| `HEALTH_PORT` | — | `8080` | Порт health-check сервера |
+| `METRICS_TOKEN` | — | — | Bearer-токен для `/metrics` |
+
+## Тестирование
 
 ```bash
-# Создайте .env файл из примера
-cp .env.example .env
-nano .env
+# Запуск тестов
+pytest -v
 
-# Запуск
-docker-compose up -d
-
-# Логи
-docker-compose logs -f bot
-```
-
----
-
-## 📋 Команды бота
-
-| Команда | Описание |
-|---------|----------|
-| `/start` | Главное меню |
-| `/help` | Справка |
-| `/admin` | Административная панель (только для мастера) |
-| `/mybookings` | Мои записи |
-| `/slots` | Ближайшие свободные слоты |
-| `/cancel` | Отменить текущее действие |
-
----
-
-## 🔔 Система напоминаний
-
-| Время | Кому | Что |
-|-------|------|-----|
-| За 24ч до визита | Клиенту | Напоминание с кнопками «Буду!» / «Отменить» |
-| За 2ч до визита | Клиенту | Дополнительное напоминание |
-| За 1ч до визита | Клиенту | Финальное напоминание |
-| Ежедневно 09:00 | Мастеру | Список записей на сегодня |
-| После отметки «Пришла» | Клиенту | Благодарность + кнопка «Записаться снова» |
-
----
-
-## 🛠 Устранение неполадок
-
-**Бот не запускается:**
-- Проверьте токен в `.env` — он должен быть правильным
-- Убедитесь что Python 3.11+ установлен: `python --version`
-
-**Нет доступа к /admin:**
-- Проверьте `ADMIN_IDS` в `.env` — должен быть ваш числовой Telegram ID
-- Узнать свой ID: [@userinfobot](https://t.me/userinfobot)
-
-**Напоминания не приходят:**
-- Проверьте `TIMEZONE` в `.env` — должна быть правильная временная зона
-- Убедитесь что бот работает непрерывно (используйте systemd или Docker)
-
-**База данных:**
-```bash
-# Путь к базе данных
-ls -la data/manicure_bot.db
-```
-
----
-
-## 📱 Рекомендации для production
-
-```bash
-# Установка как системный сервис (systemd)
-sudo nano /etc/systemd/system/manicure_bot.service
-```
-
-```ini
-[Unit]
-Description=Manicure Telegram Bot
-After=network.target
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/path/to/manicure_bot
-ExecStart=/path/to/venv/bin/python main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable manicure_bot
-sudo systemctl start manicure_bot
-sudo systemctl status manicure_bot
-```
-
----
-
-## 💡 Частые вопросы
-
-**Как изменить имя мастера в сообщениях?**
-В файле `config.json` измените поле `master.name` или обновите через `/admin` → Настройки → Текст приветствия.
-
-**Как добавить фото мастера?**
-1. Загрузите фото на любой хостинг (например, [imgbb.com](https://imgbb.com))
-2. В `.env` добавьте: `WELCOME_PHOTO_URL=https://ссылка_на_фото`
-3. Или через `/admin` → Настройки → Фото приветствия
-
-**Как открыть расписание на неделю?**
-`/admin` → «🗓 Расписание» → «📅 Открыть неделю»
-
-**Как заблокировать клиента?**
-`/admin` → «🚫 Чёрный список» → «➕ Заблокировать» → введите Telegram ID
-
----
-
-## 🧪 Тестирование
-
-```bash
-# Запуск всех тестов
-pytest
-
-# Запуск с покрытием кода
+# С отчётом покрытия
 pytest --cov=src --cov-report=term-missing
 
-# Только unit-тесты (быстро)
-pytest tests/unit/
-
-# Один конкретный модуль
-pytest tests/unit/test_services/test_appointment_service.py -v
+# HTML-отчёт
+pytest --cov=src --cov-report=html
+open htmlcov/index.html
 ```
 
-### Структура тестов
+## Разработка
+
+```bash
+# Линтинг
+ruff check src/ tests/
+
+# Форматирование
+ruff format src/ tests/
+
+# Проверка типов
+mypy src/
 ```
-tests/
-├── conftest.py                          # Общие фикстуры (reset_db_singleton)
-└── unit/
-    ├── test_config/                     # Тесты конфигурации Settings
-    ├── test_domain/                     # Тесты моделей и DTO
-    ├── test_infrastructure/             # Тесты DatabaseManager и BackupService
-    ├── test_middlewares/                # Тесты RateLimitMiddleware
-    └── test_services/                   # Тесты бизнес-логики
+
+## База данных
+
+Используется SQLite в WAL-режиме для максимальной надёжности.
+
+**Миграции** применяются автоматически при запуске. Для ручного применения:
+```bash
+# Через Python
+python -c "from src.infrastructure.database.connection import DatabaseManager; db = DatabaseManager('data/manicure_bot.db'); db.initialize_schema()"
 ```
 
----
+**Автоматические бэкапы** создаются каждый день в 02:00 (UTC) с ротацией (хранится 7 последних).
 
-## 🗄 База данных (SQLite)
+## Мониторинг
 
-Схема хранится в `migrations/`. При первом запуске таблицы создаются автоматически.
+```bash
+# Health check
+curl http://localhost:8080/health
 
-| Таблица | Описание |
-|---------|----------|
-| `working_days` | Рабочие дни мастера |
-| `time_slots` | Временные слоты для записи |
-| `appointments` | Записи клиентов (status: 0=активна, 1=отменена, 2=выполнена) |
-| `users` | Все пользователи бота (для рассылки) |
-| `waitlist` | Лист ожидания по датам |
-| `blacklist` | Заблокированные пользователи |
-| `workday_templates` | Шаблоны расписания |
-| `backups` | Метаданные резервных копий |
+# Метрики (если METRICS_TOKEN не задан — только с localhost)
+curl -H "Authorization: Bearer your_token" http://localhost:8080/metrics
+```
 
-Бэкапы БД сохраняются в `data/backups/` ежедневно в 02:00 (хранится 7 последних).
+## Архитектура
 
----
+Проект следует принципам Clean Architecture / DDD:
+- **Domain** — чистая бизнес-логика без зависимостей
+- **Application** — use-cases и сервисы
+- **Infrastructure** — SQLite, HTTP, репозитории
+- **Presentation** — Telegram handlers, keyboards
 
-*Сделано с ❤️ для мастеров маникюра*
+## Лицензия
+
+MIT

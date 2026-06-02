@@ -1,10 +1,11 @@
 """
-src/config/logging_config.py — Настройка логирования.
+src/config/logging_config.py — Настройка структурированного логирования.
 
-Улучшения v4.1:
-- RotatingFileHandler вместо FileHandler (предотвращает бесконечный рост лог-файла)
-- Явная настройка root logger вместо basicConfig
-- Подавление шумных сторонних библиотек
+Особенности:
+- RotatingFileHandler (10 МБ × 5 файлов = макс. 50 МБ)
+- Явная настройка root logger (безопасный повторный вызов)
+- Подавление шумных сторонних библиотек на WARNING
+- Структурированный формат с именем модуля
 """
 from __future__ import annotations
 
@@ -16,15 +17,21 @@ from logging.handlers import RotatingFileHandler
 _MAX_BYTES = 10 * 1024 * 1024
 _BACKUP_COUNT = 5
 
+# Уровни по умолчанию для сторонних библиотек
+_NOISY_LIBS: dict[str, int] = {
+    "aiogram": logging.WARNING,
+    "aiohttp": logging.WARNING,
+    "apscheduler": logging.WARNING,
+    "urllib3": logging.WARNING,
+    "asyncio": logging.WARNING,
+}
+
 
 def setup_logging(log_level: str = "INFO", log_file: str | None = None) -> None:
     """Настраивает логирование приложения.
 
-    Использует явную настройку root logger вместо basicConfig,
-    чтобы избежать повторной настройки (basicConfig игнорируется при повторном вызове).
-
-    Файловые логи автоматически ротируются при достижении 10 МБ (хранится 5 файлов).
-    Это предотвращает бесконечный рост лог-файла при долгой работе бота.
+    Использует явную настройку root logger вместо basicConfig.
+    Файловые логи автоматически ротируются при достижении 10 МБ.
 
     Args:
         log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL).
@@ -32,22 +39,29 @@ def setup_logging(log_level: str = "INFO", log_file: str | None = None) -> None:
     """
     level = getattr(logging, log_level.upper(), logging.INFO)
 
+    # Расширенный формат: время + уровень + имя модуля + сообщение
     fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        "%(asctime)s [%(levelname)-8s] %(name)s:%(lineno)d — %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    # Краткий формат для консоли
+    console_fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
     )
 
     root_logger = logging.getLogger()
-    # Очищаем существующие хэндлеры, чтобы избежать дублирования при повторном вызове
+    # Очищаем существующие хэндлеры, чтобы избежать дублирования
     root_logger.handlers.clear()
     root_logger.setLevel(level)
 
-    # Консольный вывод
+    # ── Консольный вывод ──────────────────────────────────────────────────
     stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setFormatter(fmt)
+    stdout_handler.setFormatter(console_fmt)
+    stdout_handler.setLevel(level)
     root_logger.addHandler(stdout_handler)
 
-    # Файловый вывод с ротацией
+    # ── Файловый вывод с ротацией ─────────────────────────────────────────
     if log_file:
         try:
             file_handler = RotatingFileHandler(
@@ -57,10 +71,12 @@ def setup_logging(log_level: str = "INFO", log_file: str | None = None) -> None:
                 backupCount=_BACKUP_COUNT,
             )
             file_handler.setFormatter(fmt)
+            file_handler.setLevel(level)
             root_logger.addHandler(file_handler)
-        except (OSError, IOError) as e:
-            root_logger.warning("Failed to open log file %r: %s", log_file, e)
+            root_logger.debug("File logging enabled: %s (max %dMB × %d)", log_file, _MAX_BYTES // 1024 // 1024, _BACKUP_COUNT)
+        except (OSError, IOError) as exc:
+            root_logger.warning("Failed to open log file %r: %s", log_file, exc)
 
-    # Подавляем лишние логи сторонних библиотек на уровне WARNING
-    for noisy_lib in ("aiogram", "aiohttp", "apscheduler"):
-        logging.getLogger(noisy_lib).setLevel(logging.WARNING)
+    # ── Тишина от сторонних библиотек ────────────────────────────────────
+    for lib_name, lib_level in _NOISY_LIBS.items():
+        logging.getLogger(lib_name).setLevel(max(level, lib_level))

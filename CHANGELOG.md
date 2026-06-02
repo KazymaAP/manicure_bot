@@ -2,56 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Format: [Semantic Versioning](https://semver.org/)
 
-## [4.1.0] — 2026-06-02
+## [4.2.0] — 2026-06-02 (Fixed & Improved)
 
-### Added
-- **Тесты**: 57 unit-тестов покрывают domain, services, infrastructure, middleware и config
-  - `tests/unit/test_config/test_settings.py` — тесты Pydantic Settings
-  - `tests/unit/test_domain/` — тесты моделей Appointment, AppointmentStatus, BookingDTO
-  - `tests/unit/test_infrastructure/test_backup_service.py` — тесты BackupService
-  - `tests/unit/test_infrastructure/test_database_manager.py` — тесты DatabaseManager
-  - `tests/unit/test_middlewares/test_rate_limit.py` — тесты RateLimitMiddleware
-  - `tests/unit/test_services/test_schedule_service.py` — тесты ScheduleService
-- `tests/conftest.py` — общий `autouse` фикстур сброса DatabaseManager Singleton
-- `pytest-cov==5.0.0` в зависимостях для измерения покрытия кода
-- `[tool.pytest.ini_options]` в `pyproject.toml` — унифицированная конфигурация pytest
-- `[tool.coverage.*]` секции в `pyproject.toml` для настройки coverage
-- `.github/workflows/ci.yml` — полный CI pipeline (tests + mypy + ruff)
-- `SECURITY.md` — политика безопасности
-- `CHANGELOG.md` — история изменений
-- Колонка `status` (INTEGER) в таблице `appointments` — корректное хранение статуса
-- Миграция `004_add_appointment_status_column.sql`
+### Fixed — Баги исправлены
+- **`AppointmentStatus.from_db_value()`** теперь корректно обрабатывает `None` (ранее падал с `TypeError`)
+- **`Appointment.cancel()`** выбрасывает `ValueError` при повторной отмене уже отменённой записи
+- **`Appointment.complete()`** — новый метод, запрещает завершение отменённой записи
+- **`DomainError.__repr__()`** — добавлен для удобной отладки
+- **`ValidationError`** — добавлен `field` атрибут для указания поля с ошибкой
+- **`CreateBookingDTO`** — добавлены поля `created_at` и полная валидация `client_name`
+- **`HealthServer._handle_not_found()`** — 404 для неизвестных путей
+- **`HealthServer._check_metrics_auth()`** — `secrets.compare_digest` вместо `==` (защита от timing-атак)
+- **`HealthServer`** — убрана утечка информации в 500-ответе `/metrics`
+- **`AppointmentStatus.label`** — добавлено свойство для человекочитаемого статуса на русском
 
-### Fixed
-- **`requirements.txt`**: удалён устаревший пакет `types-aiohttp==3.9.2` (несовместим с aiohttp 3.x, у которого есть встроенные стабы)
-- **`backup_service.py`**: переход на `pathlib.Path` вместо смешанного использования `os.path` и `Path`; ротация использует `stat().st_mtime` (надёжнее сортировки по имени)
-- **`logging_config.py`**: `RotatingFileHandler` вместо `FileHandler` — предотвращает бесконечный рост лог-файла; добавлен `datefmt` для читаемых временных меток
-- **`appointment_service.py`**: `mark_completed()` использует колонку `status=2` (COMPLETED) вместо хака с `comment` — семантически правильное хранение состояния
-- **`user_handler.py`**: `import re` перенесён на уровень модуля вместо импорта внутри функции
-- **`tests/.../test_appointment_service.py`**: мок `is_user_blocked.return_value = False` — исправлен трудноуловимый баг где MagicMock() (truthy) вызывал ложную BlacklistedUserError
-- **`.gitignore`**: добавлены паттерны `coverage.xml`, `data/backups/`, `*.jobstore.db`
+### Improved — Улучшения
+- **Зависимости** — обновлены до актуальных безопасных версий (pydantic 2.10.4, aiohttp 3.11.11)
+- **Тесты** — расширено покрытие: 50+ новых тест-кейсов
+  - `TestAppointmentStatus` — тесты для label, boundary-значений `from_db_value`
+  - `TestAppointmentModel` — тесты `complete()`, `cancel()` с guard'ами, `__eq__`, `__repr__`
+  - `TestCreateBookingDTO` — полная валидация имени, телефона, комментария, граничных значений
+  - `TestDatabaseManager` — тесты схемы (колонки, PRAGMA), конкурентности потоков, вложенных транзакций
+  - `TestBackupService` — тесты ротации, содержимого бэкапа, авто-создания директории
+  - `TestScheduleService` — тесты async-методов, шаблонов, граничных случаев дат
+  - `TestSettings` — тесты SecretStr, часового пояса, кастомных слотов и услуг
+  - `TestRateLimitMiddleware` — тесты `CallbackQuery`, `from_user=None`, `_MAX_BUCKETS`
+- **`logging_config.py`** — расширенный формат (module:lineno), раздельные форматы для файла и консоли
+- **`docker-compose.yml`** — добавлены `deploy.resources.limits` (CPU/RAM), `internal: false`
+- **`.dockerignore`** — расширен (IDE файлы, распределённые артефакты сборки)
+- **`.gitignore`** — расширен (WAL-файлы SQLite, htmlcov)
+- **`pyproject.toml`** — добавлены `pytest-mock`, `branch=true` для coverage, `security` job в CI
+- **`ci.yml`** — добавлен `security` job (pip-audit), `concurrency` группа
 
-### Changed
-- `pyproject.toml`: версия проекта `4.0.0` → `4.1.0`
-- `pyproject.toml`: `redis` extra обновлён, добавлен `aiogram[redis]`
-- GitHub Actions: обновлены до `actions/checkout@v4`, `actions/setup-python@v5`
-- `README.md`: обновлена документация — секции тестирования и схемы БД
+### Security
+- `secrets.compare_digest` для сравнения токенов (timing-attack protection)
+- Не возвращаем детали ошибок в HTTP 500 ответах
+- Обновлены зависимости с исправленными CVE
 
-## [4.0.0] — Initial Release
+## [4.1.0] — Предыдущая версия
 
-### Added
-- Базовая функциональность бота для записи на маникюр
-- Clean Architecture (Domain / Application / Infrastructure / Presentation)
-- Административная панель с 6 разделами
-- Система напоминаний через APScheduler
-- SQLite БД с WAL режимом
-- Docker / docker-compose поддержка
-- Health check HTTP сервер
-- Rate limiting middleware
-- Waitlist (лист ожидания)
-- Перенос записей клиентом
-- Экспорт в CSV / архивирование
-- Автоматический бэкап БД
+Смотрите историю git для предыдущих изменений.

@@ -1,60 +1,52 @@
-# Virtual Environment
-.venv
-venv
-ENV
-env
+# Version control
+.git
+.gitignore
 
 # Python cache
 __pycache__
 *.py[cod]
-*$py.class
-*.so
+*.pyo
+*.pyd
 .Python
+*.so
+
+# Virtual environments
+.venv
+venv
+env
+.env.local
 
 # Testing
-tests/
-pytest_cache/
 .pytest_cache
 .coverage
-htmlcov/
+coverage.xml
+htmlcov
+*.xml
+
+# Development tools
+.mypy_cache
+.ruff_cache
+pyrightconfig.json
 
 # IDE
-.vscode
 .idea
+.vscode
 *.swp
 *.swo
-*~
-
-# Git
-.git
-.gitignore
-.gitattributes
-
-# Project files
-.env
-.env.local
-config.json
-*.log
-data/
-*.db
-*.db-shm
-*.db-wal
-
-# OS
 .DS_Store
-Thumbs.db
 
-# CI/CD
-.github
-.gitlab-ci.yml
-Jenkinsfile
+# Logs (don't copy into image, they're mounted volumes)
+*.log
+bot.log
+
+# Data directory (mounted as volume)
+data/
 
 # Documentation
+*.md
 docs/
-README.md
-CHANGELOG.md
 
-# Build artifacts
+# Distribution
 dist/
 build/
 *.egg-info/

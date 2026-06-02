@@ -1,59 +1,56 @@
-# Python bytecode
+# ── Окружение и секреты ───────────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+*.env
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
+*.pyo
+*.pyd
 .Python
-build/
-dist/
+*.so
+*.egg
 *.egg-info/
+dist/
+build/
 .eggs/
 
-# Virtual environments
+# ── Виртуальные окружения ─────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 ENV/
 
-# Environment variables — НИКОГДА не коммитить!
-.env
-.env.local
-.env.*.local
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-*.db-wal
-*.db-shm
-data/
-
-# Logs
-*.log
-logs/
-
-# Coverage & tests
+# ── Тестирование и покрытие ───────────────────────────────────────────────────
+.pytest_cache/
 .coverage
 coverage.xml
 htmlcov/
-.pytest_cache/
 
-# Type checker
+# ── Статический анализ ────────────────────────────────────────────────────────
 .mypy_cache/
+.ruff_cache/
 
-# IDE
+# ── База данных и данные (создаются при запуске) ──────────────────────────────
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# ── Логи ─────────────────────────────────────────────────────────────────────
+*.log
+bot.log
+logs/
+
+# ── IDE и ОС ─────────────────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# OS
 .DS_Store
 Thumbs.db
 
-# APScheduler in-file jobstore
-*.jobstore.db
-
-# Node / Wrangler (если используется)
-node_modules/
-.wrangler/
+# ── Docker ───────────────────────────────────────────────────────────────────
+.docker/

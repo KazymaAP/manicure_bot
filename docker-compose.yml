@@ -1,6 +1,8 @@
 services:
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: manicure_bot
     restart: unless-stopped
     env_file:
@@ -10,7 +12,7 @@ services:
     environment:
       - DB_PATH=/app/data/manicure_bot.db
       - HEALTH_PORT=8080
-    # Health server биндится только на 127.0.0.1 внутри контейнера (H-8).
+    # Health server биндится только на 127.0.0.1 внутри контейнера.
     # Для внешнего мониторинга раскомментируйте строку ниже и используйте nginx-прокси:
     # ports:
     #   - "127.0.0.1:8080:8080"
@@ -23,15 +25,23 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    # Ограничения ресурсов (рекомендуется для production)
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 64M
 
   # Раскомментируйте если используете Redis FSM Storage (рекомендуется для production):
   # redis:
   #   image: redis:7-alpine
   #   container_name: manicure_bot_redis
   #   restart: unless-stopped
-  #   command: redis-server --save 60 1 --loglevel warning
+  #   command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD:-changeme}
   #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
+  #     test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
   #     interval: 10s
   #     timeout: 5s
   #     retries: 3
@@ -41,10 +51,13 @@ services:
   #     - redis_data:/data
 
 networks:
-  # Изолированная сеть для сервисов бота
   bot_network:
     driver: bridge
+    # Изолированная сеть — бот не доступен снаружи без явного port-mapping
+    internal: false
 
 volumes:
   bot_data:
-    # redis_data:
+    driver: local
+  # redis_data:
+  #   driver: local

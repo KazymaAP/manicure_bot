@@ -1,9 +1,11 @@
 """
-src/domain/exceptions/__init__.py
+src/domain/exceptions/__init__.py — Публичный интерфейс доменных исключений.
 """
 from src.domain.exceptions.appointment import (
+    AppointmentAlreadyCancelledError,
     AppointmentAlreadyExistsError,
     AppointmentNotFoundError,
+    BlacklistedUserError,
     MaxAppointmentsReachedError,
     SlotAlreadyBookedError,
 )
@@ -19,9 +21,11 @@ __all__ = [
     "DomainError",
     "ValidationError",
     "AppointmentNotFoundError",
+    "AppointmentAlreadyCancelledError",
     "AppointmentAlreadyExistsError",
     "MaxAppointmentsReachedError",
     "SlotAlreadyBookedError",
+    "BlacklistedUserError",
     "WorkingDayAlreadyExistsError",
     "WorkingDayNotFoundError",
     "PastDateError",

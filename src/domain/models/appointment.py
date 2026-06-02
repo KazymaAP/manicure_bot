@@ -1,33 +1,37 @@
 """
 src/domain/models/appointment.py — Доменная модель «Запись».
 
-✅ Из v2_tar: dataclass slots=True, from_row/to_dict, property is_active/is_cancelled
-✅ Улучшения v4: __repr__, __eq__, validate method
+Атрибуты:
+    user_id:        Telegram ID клиента.
+    client_name:    Имя клиента.
+    phone:          Номер телефона клиента.
+    date:           Дата приёма «YYYY-MM-DD».
+    time:           Время приёма «HH:MM».
+    id:             Уникальный идентификатор (None до сохранения в БД).
+    username:       Telegram username клиента (опционально).
+    created_at:     Метка времени создания записи.
+    reminder_sent:  Отправлено ли напоминание.
+    status:         Текущий статус записи.
+    comment:        Комментарий клиента (опционально).
+    service:        Название услуги (опционально).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from src.domain.enums import AppointmentStatus
 
+# Паттерн для валидации времени «HH:MM»
+_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
+# Паттерн для валидации даты «YYYY-MM-DD»
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 @dataclass(slots=True)
 class Appointment:
-    """Запись клиента на приём.
-
-    Attributes:
-        user_id: Telegram ID клиента.
-        client_name: Имя клиента.
-        phone: Номер телефона клиента.
-        date: Дата приёма «YYYY-MM-DD».
-        time: Время приёма «HH:MM».
-        id: Уникальный идентификатор (None до сохранения в БД).
-        username: Telegram username клиента (опционально).
-        created_at: Метка времени создания записи.
-        reminder_sent: Отправлено ли напоминание.
-        status: Текущий статус записи.
-    """
+    """Запись клиента на приём."""
 
     user_id: int
     client_name: str
@@ -45,6 +49,11 @@ class Appointment:
     def __post_init__(self) -> None:
         if self.created_at is None:
             object.__setattr__(self, "created_at", datetime.now())
+        # Базовая валидация форматов
+        if self.date and not _DATE_RE.match(self.date):
+            raise ValueError(f"Invalid date format: {self.date!r}, expected YYYY-MM-DD")
+        if self.time and not _TIME_RE.match(self.time):
+            raise ValueError(f"Invalid time format: {self.time!r}, expected HH:MM")
 
     @property
     def is_active(self) -> bool:
@@ -57,13 +66,26 @@ class Appointment:
         return self.status == AppointmentStatus.CANCELLED
 
     @property
+    def is_completed(self) -> bool:
+        """True если запись выполнена (клиент пришёл)."""
+        return self.status == AppointmentStatus.COMPLETED
+
+    @property
     def datetime(self) -> datetime:
         """datetime объекта из даты и времени записи."""
         return datetime.strptime(f"{self.date} {self.time}", "%Y-%m-%d %H:%M")
 
     def cancel(self) -> None:
         """Отменяет запись."""
+        if self.status == AppointmentStatus.CANCELLED:
+            raise ValueError(f"Appointment #{self.id} is already cancelled")
         self.status = AppointmentStatus.CANCELLED
+
+    def complete(self) -> None:
+        """Помечает запись как выполненную."""
+        if self.status == AppointmentStatus.CANCELLED:
+            raise ValueError(f"Cannot complete cancelled appointment #{self.id}")
+        self.status = AppointmentStatus.COMPLETED
 
     def mark_reminder_sent(self) -> None:
         """Помечает напоминание отправленным."""
@@ -78,6 +100,9 @@ class Appointment:
 
         Returns:
             Экземпляр Appointment.
+
+        Raises:
+            KeyError: Если в строке отсутствуют обязательные поля.
         """
         created_at: datetime | None = None
         if row.get("created_at"):
@@ -96,8 +121,7 @@ class Appointment:
             time=row["time"],
             created_at=created_at,
             reminder_sent=bool(row.get("reminder_sent", 0)),
-            # FIXED MED-06: используем безопасный from_db_value() вместо прямого AppointmentStatus(value)
-            # Предотвращает ValueError при неизвестных значениях is_cancelled в БД
+            # Безопасная загрузка статуса через from_db_value()
             status=AppointmentStatus.from_db_value(row.get("is_cancelled", 0)),
             comment=row.get("comment"),
             service=row.get("service"),
@@ -119,3 +143,20 @@ class Appointment:
             "comment": self.comment,
             "service": self.service,
         }
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Appointment):
+            return NotImplemented
+        if self.id is not None and other.id is not None:
+            return self.id == other.id
+        return (
+            self.user_id == other.user_id
+            and self.date == other.date
+            and self.time == other.time
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"Appointment(id={self.id}, user_id={self.user_id}, "
+            f"date={self.date!r}, time={self.time!r}, status={self.status.name})"
+        )

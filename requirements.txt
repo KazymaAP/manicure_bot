@@ -1,28 +1,28 @@
+# ── Основные зависимости ──────────────────────────────────────────────────────
 aiogram==3.13.1
-pydantic==2.9.2
-pydantic-settings==2.6.1
+pydantic==2.10.4
+pydantic-settings==2.7.0
 # apscheduler с поддержкой SQLAlchemy jobstore для персистентных задач
 apscheduler[sqlalchemy]==3.10.4
 python-dotenv==1.0.1
 # SQLAlchemy 2.x (совместима с apscheduler[sqlalchemy])
 SQLAlchemy==2.0.36
-# aiohttp для health-check сервера (без известных уязвимостей)
-aiohttp==3.10.11
+# aiohttp для health-check сервера
+aiohttp>=3.9.0
 # tzdata для корректной работы ZoneInfo на Linux/Docker без встроенной tz-базы
 tzdata==2024.2
 
-# ── Тестовые зависимости ─────────────────────────────────────────────────
-pytest==8.3.3
+# ── Тестовые зависимости ─────────────────────────────────────────────────────
+pytest==8.3.4
 pytest-asyncio==0.24.0
-pytest-cov==5.0.0
+pytest-cov==6.0.0
+pytest-mock==3.14.0
 
-# ── Статический анализ (CI/CD) ───────────────────────────────────────────
-mypy==1.11.2
-# Stubs для aiohttp (только для mypy, не нужен в runtime)
-# types-aiohttp нет на PyPI отдельно — aiohttp 3.x содержит встроенные py.typed стабы
-# (пакет types-aiohttp устарел и несовместим с aiohttp>=3.9)
+# ── Статический анализ (CI/CD) ───────────────────────────────────────────────
+mypy==1.13.0
+ruff==0.8.4
 
-# ── Optional: Redis для FSM-хранилища в production ───────────────────────
+# ── Optional: Redis для FSM-хранилища в production ───────────────────────────
 # Раскомментируйте строки ниже если используете Redis:
-# redis==5.2.0
+# redis==5.2.1
 # aiogram[redis]==3.13.1

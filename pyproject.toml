@@ -4,38 +4,55 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "manicure-bot"
-version = "4.1.0"
+version = "4.2.0"
 description = "Telegram-бот для онлайн-записи на маникюр"
+readme = "README.md"
 requires-python = ">=3.10"
-# Синхронизировано с requirements.txt
+license = { text = "MIT" }
 dependencies = [
     "aiogram==3.13.1",
-    "pydantic==2.9.2",
-    "pydantic-settings==2.6.1",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
     "apscheduler[sqlalchemy]==3.10.4",
     "python-dotenv==1.0.1",
     "SQLAlchemy==2.0.36",
-    "aiohttp==3.10.11",
+    "aiohttp==3.11.11",
     "tzdata==2024.2",
 ]
 
 [project.optional-dependencies]
-redis = ["redis==5.2.0", "aiogram[redis]==3.13.1"]
+redis = ["redis==5.2.1", "aiogram[redis]==3.13.1"]
 dev = [
-    "pytest==8.3.3",
+    "pytest==8.3.4",
     "pytest-asyncio==0.24.0",
-    "pytest-cov==5.0.0",
-    "mypy==1.11.2",
+    "pytest-cov==6.0.0",
+    "pytest-mock==3.14.0",
+    "mypy==1.13.0",
+    "ruff==0.8.4",
 ]
 
+# ── Ruff (linter + formatter) ────────────────────────────────────────────────
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP"]
-ignore = ["E501"]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",   # line too long — контролируем вручную
+    "N999",   # invalid module name — не применимо к handlers
+    "B008",   # function call in defaults — используется в Pydantic
+]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert в тестах допустим
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ── mypy (строгая типизация) ────────────────────────────────────────────────
 [tool.mypy]
 python_version = "3.10"
 strict = true
@@ -46,10 +63,20 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 no_implicit_optional = true
 warn_redundant_casts = true
-warn_unused_ignores = true
+warn_unused_ignores = false  # отключено т.к. некоторые ignore нужны для совместимости
 warn_no_return = true
-exclude = ["tests/", "venv/", ".venv/"]
+# Исключаем тесты и миграции из strict-проверок
+exclude = ["tests/", "venv/", ".venv/", "migrations/"]
 
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "aiohttp.*"
+ignore_missing_imports = true
+
+# ── pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -68,21 +95,21 @@ markers = [
     "slow: slow tests",
 ]
 
+# ── Coverage ─────────────────────────────────────────────────────────────────
 [tool.coverage.run]
 source = ["src"]
-omit = ["tests/*", "*/migrations/*"]
+omit = [
+    "tests/*",
+    "*/migrations/*",
+    "src/presentation/handlers/*",  # handlers требуют aiogram-mock
+]
+branch = true
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
-# Покрытие 20%+ реалистично для Telegram-бота: handlers требуют интеграционных тестов с моком бота.
-# Повышайте этот порог по мере добавления интеграционных тестов.
-fail_under = 20
+# 25%+ покрытие реалистично для Telegram-бота с handler'ами
+fail_under = 25
 
-[tool.coverage.run]
-omit = [
-    "tests/*",
-    "*/migrations/*",
-    # Handlers требуют aiogram-mock — исключены из coverage порога
-    "src/presentation/handlers/*",
-]
+[tool.coverage.html]
+directory = "htmlcov"

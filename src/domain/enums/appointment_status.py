@@ -1,44 +1,55 @@
 """
-src/domain/enums/appointment_status.py — Статус записи.
+src/domain/enums/appointment_status.py — Статус записи клиента.
 
-FIXED MED-06: добавлен COMPLETED = 2 и защитный метод from_db_value() для безопасной
-загрузки из БД. Ранее AppointmentStatus(row["is_cancelled"]) с неизвестным значением
-вызывал ValueError и крашил загрузку записей.
+Значения соответствуют полю is_cancelled/status в таблице appointments:
+  0 — активная запись
+  1 — отменённая запись
+  2 — завершённая запись (клиент пришёл)
 """
+from __future__ import annotations
+
+import logging
 from enum import IntEnum
+
+logger = logging.getLogger(__name__)
 
 
 class AppointmentStatus(IntEnum):
-    """Статус записи клиента.
+    """Статус записи клиента."""
 
-    Значения соответствуют полю is_cancelled в таблице appointments:
-      0 — активная запись
-      1 — отменённая запись
-      2 — завершённая запись (FIXED MED-06: добавлено для расширяемости)
-    """
     ACTIVE = 0
     CANCELLED = 1
-    COMPLETED = 2  # FIXED MED-06: добавлено для поддержки будущих статусов
+    COMPLETED = 2
 
     @classmethod
-    def from_db_value(cls, value: int) -> "AppointmentStatus":
+    def from_db_value(cls, value: int | None) -> "AppointmentStatus":
         """Безопасно создаёт статус из значения БД.
 
-        FIXED MED-06: вместо AppointmentStatus(value) напрямую (что падает при неизвестном
-        значении) используем этот метод. Неизвестные значения возвращают ACTIVE как fallback,
-        что предотвращает краш при загрузке записей с нестандартными значениями is_cancelled.
+        Неизвестные значения возвращают ACTIVE как fallback, что предотвращает
+        краш при загрузке записей с нестандартными значениями.
 
         Args:
-            value: Числовое значение из поля is_cancelled в БД.
+            value: Числовое значение из поля БД (None трактуется как 0).
 
         Returns:
-            Соответствующий AppointmentStatus, при неизвестном значении — ACTIVE.
+            Соответствующий AppointmentStatus, при неизвестном — ACTIVE.
         """
+        if value is None:
+            return cls.ACTIVE
         try:
-            return cls(value)
-        except ValueError:
-            import logging
-            logging.getLogger(__name__).warning(
+            return cls(int(value))
+        except (ValueError, TypeError):
+            logger.warning(
                 "Unknown AppointmentStatus value %r, falling back to ACTIVE", value
             )
             return cls.ACTIVE
+
+    @property
+    def label(self) -> str:
+        """Человекочитаемая метка статуса на русском."""
+        _labels = {
+            AppointmentStatus.ACTIVE: "Активна",
+            AppointmentStatus.CANCELLED: "Отменена",
+            AppointmentStatus.COMPLETED: "Выполнена",
+        }
+        return _labels.get(self, self.name)
