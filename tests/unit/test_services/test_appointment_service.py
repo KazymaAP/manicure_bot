@@ -14,22 +14,7 @@ from src.domain.exceptions.appointment import (
     SlotAlreadyBookedError,
 )
 from src.domain.models.appointment import Appointment
-from src.infrastructure.database.connection import DatabaseManager
-
-
-@pytest.fixture(autouse=True)
-def reset_db_singleton():
-    """FIXED BUG-C2: автоматически сбрасывает Singleton DatabaseManager между тестами.
-
-    Без этого Singleton остаётся живым после первого теста с реальной БД,
-    что вызывает RuntimeError при попытке переинициализации с другим db_path.
-    autouse=True гарантирует выполнение для каждого теста в модуле.
-    """
-    # Сбрасываем перед тестом (на случай если предыдущий тест оставил состояние)
-    DatabaseManager.reset()
-    yield
-    # Сбрасываем после теста (очистка после возможного интеграционного теста с реальной БД)
-    DatabaseManager.reset()
+from src.infrastructure.database.connection import DatabaseManager  # noqa: F401 — used in conftest
 
 
 @pytest.fixture
@@ -37,6 +22,8 @@ def mock_appointment_repo():
     repo = MagicMock()
     repo.count_active_by_user_id.return_value = 0
     repo.create.return_value = 1
+    # is_user_blocked должен возвращать False, иначе MagicMock() truthy вызовет BlacklistedUserError
+    repo.is_user_blocked.return_value = False
     return repo
 
 

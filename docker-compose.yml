@@ -1,11 +1,7 @@
-
-# FIXED H-5: добавлена версия, явная сеть и секция для Redis с healthcheck
-version: "3.9"
-
 services:
   bot:
     build: .
-    container_name: manicure_bot_v4
+    container_name: manicure_bot
     restart: unless-stopped
     env_file:
       - .env
@@ -14,14 +10,13 @@ services:
     environment:
       - DB_PATH=/app/data/manicure_bot.db
       - HEALTH_PORT=8080
-    # FIXED H-8: не пробрасываем 8080 наружу — health server слушает только 127.0.0.1
-    # Если нужен внешний мониторинг — используйте внутреннюю Docker-сеть или nginx-прокси
+    # Health server биндится только на 127.0.0.1 внутри контейнера (H-8).
+    # Для внешнего мониторинга раскомментируйте строку ниже и используйте nginx-прокси:
     # ports:
     #   - "127.0.0.1:8080:8080"
     networks:
       - bot_network
-    # FIXED HIGH-08: curl не установлен в python:3.12-slim.
-    # Используем python -c для healthcheck — он всегда доступен в нашем образе.
+    # Healthcheck через встроенный Python (curl может отсутствовать в slim-образе)
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)\" || exit 1"]
       interval: 30s
@@ -29,12 +24,12 @@ services:
       retries: 3
       start_period: 15s
 
-  # Раскомментируйте если используете Redis FSM Storage
+  # Раскомментируйте если используете Redis FSM Storage (рекомендуется для production):
   # redis:
   #   image: redis:7-alpine
   #   container_name: manicure_bot_redis
   #   restart: unless-stopped
-  #   # FIXED H-5: healthcheck для Redis
+  #   command: redis-server --save 60 1 --loglevel warning
   #   healthcheck:
   #     test: ["CMD", "redis-cli", "ping"]
   #     interval: 10s
@@ -46,10 +41,10 @@ services:
   #     - redis_data:/data
 
 networks:
-  # FIXED H-5: явная сеть для изоляции сервисов
+  # Изолированная сеть для сервисов бота
   bot_network:
     driver: bridge
 
 volumes:
   bot_data:
-  # redis_data:
+    # redis_data:

@@ -1,4 +1,4 @@
-# Python
+# Python bytecode
 __pycache__/
 *.py[cod]
 *$py.class
@@ -15,23 +15,31 @@ venv/
 env/
 ENV/
 
-# Environment variables
+# Environment variables — НИКОГДА не коммитить!
 .env
 .env.local
 .env.*.local
 
-# Database
+# Database files
 *.db
 *.sqlite
 *.sqlite3
 *.db-wal
 *.db-shm
 data/
-data/*.db
 
 # Logs
 *.log
 logs/
+
+# Coverage & tests
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Type checker
+.mypy_cache/
 
 # IDE
 .idea/
@@ -43,15 +51,9 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Coverage
-.coverage
-htmlcov/
-.pytest_cache/
-coverage.xml
+# APScheduler in-file jobstore
+*.jobstore.db
 
-# MyPy
-.mypy_cache/
-
-# Wrangler / Node (если используется)
+# Node / Wrangler (если используется)
 node_modules/
 .wrangler/

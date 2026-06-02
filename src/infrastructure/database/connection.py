@@ -233,7 +233,8 @@ class DatabaseManager:
                 reminder_sent   INTEGER NOT NULL DEFAULT 0,
                 is_cancelled    INTEGER NOT NULL DEFAULT 0,
                 comment         TEXT,
-                service         TEXT DEFAULT NULL
+                service         TEXT DEFAULT NULL,
+                status          INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_appointments_user_id
@@ -300,17 +301,24 @@ class DatabaseManager:
         # т.к. executescript() сам делает неявный COMMIT перед выполнением DDL-команд.
         # Вызов внутри BEGIN IMMEDIATE нарушил бы управление транзакцией.
         conn.executescript(schema)
-        # FIXED: обратная совместимость — добавляем колонку service если её нет в существующей БД
-        # Используем отдельную транзакцию для ALTER TABLE (не executescript)
+        # Обратная совместимость: добавляем отсутствующие колонки appointments
         try:
             with self.transaction() as conn2:
                 cols = [r[1] for r in conn2.execute("PRAGMA table_info('appointments')").fetchall()]
-                if 'service' not in cols:
-                    conn2.execute("ALTER TABLE appointments ADD COLUMN service TEXT DEFAULT NULL")
-                    logger.info("Added missing column 'service' to appointments table for backward compatibility.")
+                for col_name, col_def in [
+                    ("service", "TEXT DEFAULT NULL"),
+                    ("status", "INTEGER NOT NULL DEFAULT 0"),
+                ]:
+                    if col_name not in cols:
+                        conn2.execute(f"ALTER TABLE appointments ADD COLUMN {col_name} {col_def}")
+                        logger.info("Added missing column '%s' to appointments table.", col_name)
+                # Синхронизируем status с is_cancelled для существующих записей
+                if "status" not in cols:
+                    conn2.execute("UPDATE appointments SET status = is_cancelled WHERE status = 0")
+                    logger.info("Synchronized 'status' column from 'is_cancelled' for existing records.")
         except Exception:
-            logger.exception("Failed to ensure 'service' column exists; continuing.")
-        # FIXED BUG-09: добавляем колонки уведомлений в таблицу users для обратной совместимости
+            logger.exception("Failed to ensure columns in appointments table; continuing.")
+        # Обратная совместимость: добавляем колонки уведомлений в users
         try:
             with self.transaction() as conn2:
                 user_cols = [r[1] for r in conn2.execute("PRAGMA table_info('users')").fetchall()]

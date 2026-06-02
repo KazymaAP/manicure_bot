@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS appointments (
     reminder_sent INTEGER NOT NULL DEFAULT 0,
     is_cancelled  INTEGER NOT NULL DEFAULT 0,
     comment       TEXT,
-    service       TEXT                   -- FIXED: тип услуги (добавлено в v4)
+    service       TEXT,                  -- тип услуги
+    status        INTEGER NOT NULL DEFAULT 0  -- 0=ACTIVE, 1=CANCELLED, 2=COMPLETED
 );
 
 CREATE INDEX IF NOT EXISTS idx_appointments_user_id ON appointments(user_id);

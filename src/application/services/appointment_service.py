@@ -499,32 +499,38 @@ class AppointmentService:
     def mark_completed(self, appointment_id: int) -> None:
         """Помечает запись как выполненную (клиент пришёл).
 
-        FIXED BUG-C1: заменён несуществующий метод write_connection() на transaction().
-        FIXED HIGH-05: используем .db публичное свойство вместо getattr(_db).
+        Использует колонку status (COMPLETED=2) для хранения состояния.
+        Если колонка status недоступна — fallback в поле comment для обратной совместимости.
         """
         try:
-            # FIXED HIGH-05: публичное свойство .db вместо getattr(_db)
             db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
             if db is None:
                 logger.warning("mark_completed: no DB reference found, skipping for appointment #%s", appointment_id)
                 return
-            # FIXED BUG-C1: используем transaction() вместо несуществующего write_connection()
             with db.transaction() as conn:
-                # Добавляем метку в поле comment (колонки 'status' нет в схеме)
-                # Сначала получаем текущий comment чтобы не затереть его
-                row = conn.execute(
-                    "SELECT comment FROM appointments WHERE id = ?",
-                    (appointment_id,)
-                ).fetchone()
-                if row is not None:
-                    current_comment = row[0] or ""
-                    completed_marker = "[✅ Пришла]"
-                    if completed_marker not in current_comment:
-                        new_comment = (current_comment + " " + completed_marker).strip()
-                        conn.execute(
-                            "UPDATE appointments SET comment = ? WHERE id = ?",
-                            (new_comment, appointment_id)
-                        )
+                # Проверяем наличие колонки status (добавлена в v4.1)
+                cols = [r[1] for r in conn.execute("PRAGMA table_info('appointments')").fetchall()]
+                if "status" in cols:
+                    # Используем колонку status: COMPLETED = 2
+                    conn.execute(
+                        "UPDATE appointments SET status = 2 WHERE id = ? AND is_cancelled = 0",
+                        (appointment_id,)
+                    )
+                else:
+                    # Fallback: записываем маркер в comment (обратная совместимость)
+                    row = conn.execute(
+                        "SELECT comment FROM appointments WHERE id = ?",
+                        (appointment_id,)
+                    ).fetchone()
+                    if row is not None:
+                        current_comment = row[0] or ""
+                        completed_marker = "[✅ Пришла]"
+                        if completed_marker not in current_comment:
+                            new_comment = (current_comment + " " + completed_marker).strip()
+                            conn.execute(
+                                "UPDATE appointments SET comment = ? WHERE id = ?",
+                                (new_comment, appointment_id)
+                            )
             logger.info("Appointment #%s marked as completed (arrived)", appointment_id)
         except Exception as exc:
             logger.warning(

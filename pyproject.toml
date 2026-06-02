@@ -4,33 +4,28 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "manicure-bot"
-version = "4.0.0"
+version = "4.1.0"
 description = "Telegram-бот для онлайн-записи на маникюр"
 requires-python = ">=3.10"
-# FIXED BUG-12: синхронизированы зависимости с requirements.txt.
-# Ранее отсутствовали aiohttp, tzdata, SQLAlchemy — критически важные пакеты.
-# mypy, pytest перенесены в [project.optional-dependencies] как dev-зависимости.
+# Синхронизировано с requirements.txt
 dependencies = [
     "aiogram==3.13.1",
     "pydantic==2.9.2",
     "pydantic-settings==2.6.1",
     "apscheduler[sqlalchemy]==3.10.4",
     "python-dotenv==1.0.1",
-    # FIXED BUG-C1: синхронизированы версии с requirements.txt
-    # Ранее: SQLAlchemy==2.0.20, aiohttp==3.9.1 (уязвимость CVE-2024-23829), tzdata==2024.1
     "SQLAlchemy==2.0.36",
     "aiohttp==3.10.11",
     "tzdata==2024.2",
 ]
 
 [project.optional-dependencies]
-redis = ["redis==5.2.0"]
+redis = ["redis==5.2.0", "aiogram[redis]==3.13.1"]
 dev = [
-    # FIXED C-8: синхронизированы версии с requirements.txt
     "pytest==8.3.3",
     "pytest-asyncio==0.24.0",
+    "pytest-cov==5.0.0",
     "mypy==1.11.2",
-    "types-aiohttp==3.9.2",
 ]
 
 [tool.ruff]
@@ -55,3 +50,39 @@ warn_unused_ignores = true
 warn_no_return = true
 exclude = ["tests/", "venv/", ".venv/"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--tb=short",
+    "--strict-markers",
+    "-q",
+]
+markers = [
+    "unit: unit tests (no DB or external services)",
+    "integration: integration tests (require DB)",
+    "slow: slow tests",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "*/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Покрытие 20%+ реалистично для Telegram-бота: handlers требуют интеграционных тестов с моком бота.
+# Повышайте этот порог по мере добавления интеграционных тестов.
+fail_under = 20
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "*/migrations/*",
+    # Handlers требуют aiogram-mock — исключены из coverage порога
+    "src/presentation/handlers/*",
+]

@@ -6,6 +6,7 @@ src/presentation/handlers/user_handler.py — FSM-обработчики для 
 """
 
 import logging
+import re
 from datetime import date as _date, datetime as _datetime
 
 from aiogram import F, Router
@@ -70,7 +71,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         )
 
         # Предлагаем использовать прошлые данные если они есть
-        import asyncio
+        import asyncio  # noqa: PLC0415 — asyncio уже импортирован выше, дублирование для ясности
         try:
             prev = await asyncio.to_thread(appt_service.get_user_appointments, message.from_user.id)
             if prev:
@@ -239,7 +240,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.message(BookingFSM.entering_phone, F.text)
     async def enter_phone(message: Message, state: FSMContext) -> None:
         phone = message.text.strip()
-        import re
         digits = "".join(c for c in phone if c.isdigit())
         if len(digits) < 7 or len(digits) > 15:
             await message.answer(MessageFormatter.invalid_phone(), parse_mode="HTML")

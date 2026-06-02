@@ -1,6 +1,9 @@
 # 💅 Manicure Bot — Telegram-бот для записи на маникюр
 
-Профессиональный Telegram-бот для мастера маникюра с красивым клиентским интерфейсом и полноценной административной панелью.
+**v4.1.0** — Профессиональный Telegram-бот для мастера маникюра с красивым клиентским интерфейсом и полноценной административной панелью.
+
+[![CI](https://github.com/KazymaAP/manicure_bot/actions/workflows/ci.yml/badge.svg)](https://github.com/KazymaAP/manicure_bot/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
 
 ## ✨ Что умеет бот
 
@@ -41,7 +44,7 @@
 ## 🚀 Установка и запуск
 
 ### 1. Требования
-- Python 3.11 или выше
+- Python 3.10 или выше (рекомендуется 3.12)
 - pip
 
 ### 2. Клонирование
@@ -281,6 +284,55 @@ sudo systemctl status manicure_bot
 
 **Как заблокировать клиента?**
 `/admin` → «🚫 Чёрный список» → «➕ Заблокировать» → введите Telegram ID
+
+---
+
+## 🧪 Тестирование
+
+```bash
+# Запуск всех тестов
+pytest
+
+# Запуск с покрытием кода
+pytest --cov=src --cov-report=term-missing
+
+# Только unit-тесты (быстро)
+pytest tests/unit/
+
+# Один конкретный модуль
+pytest tests/unit/test_services/test_appointment_service.py -v
+```
+
+### Структура тестов
+```
+tests/
+├── conftest.py                          # Общие фикстуры (reset_db_singleton)
+└── unit/
+    ├── test_config/                     # Тесты конфигурации Settings
+    ├── test_domain/                     # Тесты моделей и DTO
+    ├── test_infrastructure/             # Тесты DatabaseManager и BackupService
+    ├── test_middlewares/                # Тесты RateLimitMiddleware
+    └── test_services/                   # Тесты бизнес-логики
+```
+
+---
+
+## 🗄 База данных (SQLite)
+
+Схема хранится в `migrations/`. При первом запуске таблицы создаются автоматически.
+
+| Таблица | Описание |
+|---------|----------|
+| `working_days` | Рабочие дни мастера |
+| `time_slots` | Временные слоты для записи |
+| `appointments` | Записи клиентов (status: 0=активна, 1=отменена, 2=выполнена) |
+| `users` | Все пользователи бота (для рассылки) |
+| `waitlist` | Лист ожидания по датам |
+| `blacklist` | Заблокированные пользователи |
+| `workday_templates` | Шаблоны расписания |
+| `backups` | Метаданные резервных копий |
+
+Бэкапы БД сохраняются в `data/backups/` ежедневно в 02:00 (хранится 7 последних).
 
 ---
 

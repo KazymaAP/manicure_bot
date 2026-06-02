@@ -1,25 +1,28 @@
 aiogram==3.13.1
 pydantic==2.9.2
 pydantic-settings==2.6.1
-# FIXED M-03: обновлён apscheduler до актуальной версии, совместимой с SQLAlchemy 2.x
+# apscheduler с поддержкой SQLAlchemy jobstore для персистентных задач
 apscheduler[sqlalchemy]==3.10.4
 python-dotenv==1.0.1
-# FIXED M-03: обновлена SQLAlchemy до актуальной версии 2.x (2.0.20 → 2.0.36)
+# SQLAlchemy 2.x (совместима с apscheduler[sqlalchemy])
 SQLAlchemy==2.0.36
-# FIXED M-03: обновлён aiohttp до версии без известных уязвимостей (3.9.1 → 3.10.11)
+# aiohttp для health-check сервера (без известных уязвимостей)
 aiohttp==3.10.11
-# FIXED M-11: tzdata для корректной работы ZoneInfo с timezone (Python 3.9+)
-# Необходим на Linux/Docker системах без встроенной базы timezone
+# tzdata для корректной работы ZoneInfo на Linux/Docker без встроенной tz-базы
 tzdata==2024.2
-# Тестовые зависимости
+
+# ── Тестовые зависимости ─────────────────────────────────────────────────
 pytest==8.3.3
 pytest-asyncio==0.24.0
-# Тип-чекер для CI/CD
+pytest-cov==5.0.0
+
+# ── Статический анализ (CI/CD) ───────────────────────────────────────────
 mypy==1.11.2
 # Stubs для aiohttp (только для mypy, не нужен в runtime)
-types-aiohttp==3.9.2
+# types-aiohttp нет на PyPI отдельно — aiohttp 3.x содержит встроенные py.typed стабы
+# (пакет types-aiohttp устарел и несовместим с aiohttp>=3.9)
 
-# Optional: Redis для FSM-хранилища в production
-# Раскомментируйте строку ниже если используете Redis:
-# redis==5.0.1
+# ── Optional: Redis для FSM-хранилища в production ───────────────────────
+# Раскомментируйте строки ниже если используете Redis:
+# redis==5.2.0
 # aiogram[redis]==3.13.1
