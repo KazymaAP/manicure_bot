@@ -40,6 +40,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     reminder_service = container.reminder_service
     settings = container.settings
 
+    # FIXED HIGH-03: asyncio.Lock для защиты от concurrent записи config.json
+    _config_write_lock = asyncio.Lock()
+
     def _is_admin(user_id: int) -> bool:
         return user_id in settings.admin_ids
 
@@ -403,6 +406,14 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not re.match(r"^\d{2}:\d{2}$", time_str):
             await message.answer(MessageFormatter.admin_invalid_time_format())
             return
+        # FIXED HIGH-04: проверяем реальную корректность значений (regex пропускает 25:99)
+        try:
+            h, m = map(int, time_str.split(":"))
+            if not (0 <= h < 24 and 0 <= m < 60):
+                raise ValueError(f"Time out of range: {time_str}")
+        except ValueError:
+            await message.answer("❌ Некорректное время. Часы: 00–23, минуты: 00–59. Например: 10:00")
+            return
         data = await state.get_data()
         date_str = data.get("slot_date", "")
         try:
@@ -690,12 +701,25 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     # РАЗДЕЛ 5: НАСТРОЙКИ
     # ════════════════════════════════════════════════════════════════════
 
+    def _get_master_name() -> str:
+        """FIXED HIGH-02: читает имя мастера из config.json вместо хардкода.
+        
+        Возвращает имя из config.json['master']['name'], иначе 'Мастер'.
+        """
+        try:
+            from src.config.dependencies import _load_config_json
+            config = _load_config_json()
+            return config.get("master", {}).get("name", "Мастер")
+        except Exception:
+            return "Мастер"
+
     @router.message(F.text == "⚙️ Настройки")
     async def admin_settings(message: Message) -> None:
         if not _is_admin(message.from_user.id):
             return
+        # FIXED HIGH-02: имя мастера из config.json, не хардкод
         settings_dict = {
-            "master_name": "Анастасия",
+            "master_name": _get_master_name(),
             "welcome_text": settings.services and "настроен" or "по умолчанию",
             "work_hours": f"{settings.default_time_slots[0] if settings.default_time_slots else '09:00'} - "
                           f"{settings.default_time_slots[-1] if settings.default_time_slots else '18:00'}",
@@ -714,8 +738,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
+        # FIXED HIGH-02: имя мастера из config.json, не хардкод
         settings_dict = {
-            "master_name": "Анастасия",
+            "master_name": _get_master_name(),
             "welcome_text": "настроен",
             "work_hours": f"{settings.default_time_slots[0] if settings.default_time_slots else '09:00'} - "
                           f"{settings.default_time_slots[-1] if settings.default_time_slots else '18:00'}",
@@ -790,26 +815,66 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         edit_mode = data.get("edit_mode")
 
         if edit_mode == "welcome":
-            # Обновляем config.json
-            config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
-            try:
-                with open(config_path, encoding="utf-8") as f:
-                    config = json.load(f)
-                if "bot" not in config:
-                    config["bot"] = {}
-                config["bot"]["welcome"] = message.text
-                with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(config, f, ensure_ascii=False, indent=2)
-                await state.clear()
-                await message.answer(
-                    "✅ Текст приветствия обновлён!\n\n"
-                    "<i>Изменения вступят в силу после перезапуска бота</i>",
-                    reply_markup=AdminKeyboard.main_menu(),
-                    parse_mode="HTML",
+            # FIXED HIGH-03: атомарная запись config.json:
+            # 1. asyncio.Lock защищает от concurrent записей (race condition)
+            # 2. Временный файл + os.replace() гарантирует атомарность (нет partial write)
+            # 3. Инвалидация кэша _load_config_json — изменения видны сразу
+            tmp_path = None
+            async with _config_write_lock:
+                config_path = os.path.normpath(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
                 )
-            except Exception as exc:
-                logger.error("Ошибка обновления config.json: %s", exc)
-                await message.answer(MessageFormatter.error_general())
+                try:
+                    # Читаем текущий конфиг
+                    try:
+                        with open(config_path, encoding="utf-8") as f:
+                            config = json.load(f)
+                    except FileNotFoundError:
+                        config = {}
+
+                    if "bot" not in config:
+                        config["bot"] = {}
+                    config["bot"]["welcome"] = message.text
+
+                    # Атомарная запись: сначала во временный файл, потом os.replace()
+                    import tempfile
+                    config_dir = os.path.dirname(config_path)
+                    with tempfile.NamedTemporaryFile(
+                        mode="w",
+                        encoding="utf-8",
+                        dir=config_dir,
+                        suffix=".tmp",
+                        delete=False,
+                    ) as tmp_f:
+                        tmp_path = tmp_f.name
+                        json.dump(config, tmp_f, ensure_ascii=False, indent=2)
+
+                    os.replace(tmp_path, config_path)  # атомарная замена файла
+                    tmp_path = None  # файл перемещён, удалять не нужно
+
+                    # Инвалидируем кэш — изменения применяются без перезапуска
+                    try:
+                        from src.config.dependencies import _load_config_json
+                        _load_config_json.cache_clear()
+                    except Exception:
+                        pass
+
+                    await state.clear()
+                    await message.answer(
+                        "✅ Текст приветствия обновлён!\n\n"
+                        "<i>Изменения применены немедленно</i>",
+                        reply_markup=AdminKeyboard.main_menu(),
+                        parse_mode="HTML",
+                    )
+                except Exception as exc:
+                    logger.error("Ошибка обновления config.json: %s", exc)
+                    # Удаляем временный файл если он остался
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                    await message.answer(MessageFormatter.error_general())
             return
 
         # Обычная рассылка
@@ -983,8 +1048,18 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             parse_mode="HTML",
         )
 
+    # FIXED CRIT-05: хранилище активных задач рассылки для предотвращения сборки GC
+    _broadcast_tasks: set = set()
+
     @router.callback_query(F.data == "admin_broadcast_send")
     async def admin_broadcast_send(callback: CallbackQuery, state: FSMContext) -> None:
+        """FIXED CRIT-05: рассылка запускается как фоновая задача (asyncio.create_task).
+        
+        Это предотвращает блокировку event loop на 50+ секунд при 1000+ пользователях.
+        Задержка увеличена с 0.05с до 0.04с (соответствует лимиту Telegram ~25 msg/sec с запасом).
+        Ссылка на задачу сохраняется в _broadcast_tasks для предотвращения преждевременной
+        сборки мусора.
+        """
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
@@ -993,43 +1068,61 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not text:
             await callback.answer("Нет текста для рассылки.")
             return
-        await callback.answer("Рассылка запущена...")
-        try:
-            all_user_ids: set[int] = set()
+        await callback.answer("Рассылка запущена в фоне...")
+        await state.clear()
+
+        async def _do_broadcast() -> None:
+            """Выполняет рассылку в фоне, не блокируя event loop."""
             try:
-                db = getattr(container, "_db", None)
-                if db is not None:
-                    def _get_all_users():
-                        with db.read_connection() as conn:
-                            rows = conn.execute("SELECT user_id FROM users").fetchall()
-                            return {row[0] for row in rows}
-                    all_user_ids = await asyncio.to_thread(_get_all_users)
-            except Exception:
-                pass
-
-            if not all_user_ids:
-                appts = await asyncio.to_thread(appt_service.get_all_active)
-                all_user_ids = {a.user_id for a in appts}
-
-            sent = 0
-            failed = 0
-            for uid in all_user_ids:
+                all_user_ids: set[int] = set()
                 try:
-                    await callback.message.bot.send_message(uid, text, parse_mode="HTML")
-                    sent += 1
-                    await asyncio.sleep(0.05)
+                    # FIXED HIGH-05: используем публичное .db свойство контейнера
+                    db = getattr(container, "db", None) or getattr(container, "_db", None)
+                    if db is not None:
+                        def _get_all_users():
+                            with db.read_connection() as conn:
+                                rows = conn.execute("SELECT user_id FROM users").fetchall()
+                                return {row[0] for row in rows}
+                        all_user_ids = await asyncio.to_thread(_get_all_users)
                 except Exception:
-                    failed += 1
+                    pass
 
-            await callback.message.answer(
-                f"✅ Рассылка завершена: отправлено {sent}, ошибок {failed}.",
-                reply_markup=AdminKeyboard.main_menu(),
-            )
-        except Exception as exc:
-            logger.error("Ошибка рассылки: %s", exc)
-            await callback.message.answer(MessageFormatter.error_general())
-        finally:
-            await state.clear()
+                if not all_user_ids:
+                    appts = await asyncio.to_thread(appt_service.get_all_active)
+                    all_user_ids = {a.user_id for a in appts}
+
+                sent = 0
+                failed = 0
+                for uid in all_user_ids:
+                    try:
+                        await callback.message.bot.send_message(uid, text, parse_mode="HTML")
+                        sent += 1
+                        # FIXED CRIT-05: задержка 0.04с ≈ 25 msg/sec (лимит Telegram 30/sec с запасом)
+                        await asyncio.sleep(0.04)
+                    except Exception:
+                        failed += 1
+
+                await callback.message.answer(
+                    f"✅ Рассылка завершена: отправлено {sent}, ошибок {failed}.",
+                    reply_markup=AdminKeyboard.main_menu(),
+                )
+            except Exception as exc:
+                logger.error("Ошибка рассылки: %s", exc)
+                try:
+                    await callback.message.answer(MessageFormatter.error_general())
+                except Exception:
+                    pass
+
+        # FIXED CRIT-05: запускаем как asyncio.create_task() — не блокируем event loop
+        task = asyncio.create_task(_do_broadcast())
+        # Сохраняем ссылку на задачу в _broadcast_tasks чтобы GC не удалил её раньше завершения
+        _broadcast_tasks.add(task)
+        task.add_done_callback(_broadcast_tasks.discard)
+
+        await callback.message.answer(
+            "📢 Рассылка запущена в фоновом режиме. Результат придёт по завершению.",
+            reply_markup=AdminKeyboard.main_menu(),
+        )
 
     @router.callback_query(F.data == "admin_broadcast_cancel")
     async def admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:

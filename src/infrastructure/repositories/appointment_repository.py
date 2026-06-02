@@ -418,8 +418,11 @@ class AppointmentRepository(BaseRepository):
             return 0
         placeholders = ",".join("?" * len(appointment_ids))
         with self._db.transaction() as conn:
+            # FIXED CRIT-04: явно передаём tuple(), т.к. sqlite3 документально принимает
+            # tuple/list, но tuple — стандартная практика и исключает потенциальные проблемы
+            # с нестандартными итерабельными объектами.
             conn.execute(
                 f"DELETE FROM appointments WHERE id IN ({placeholders})",
-                appointment_ids,
+                tuple(appointment_ids),
             )
             return conn.execute("SELECT changes()").fetchone()[0]

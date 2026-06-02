@@ -16,3 +16,12 @@ class BaseRepository:
             db: Менеджер соединений с БД.
         """
         self._db = db
+
+    @property
+    def db(self) -> DatabaseManager:
+        """FIXED HIGH-05: публичное свойство для доступа к DatabaseManager.
+
+        Исключает необходимость обходить инкапсуляцию через getattr(obj, "_db", None).
+        Используйте repo.db вместо getattr(repo, "_db", None) для надёжного доступа.
+        """
+        return self._db

@@ -68,7 +68,8 @@ class LoggingMiddleware(BaseMiddleware):
             try:
                 container = data.get("container")
                 if container is not None:
-                    db = getattr(container, "_db", None)
+                    # FIXED HIGH-05: используем публичное .db свойство вместо getattr(_db)
+                    db = getattr(container, "db", None) or getattr(container, "_db", None)
                     if db is not None:
                         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         _uid = user_id

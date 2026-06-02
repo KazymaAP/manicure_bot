@@ -65,7 +65,8 @@ class AppointmentService:
         """
         # Path A: real repository with access to underlying DatabaseManager -> atomic transaction
         from src.infrastructure.database.connection import DatabaseManager
-        db_obj = getattr(self._appointment_repo, "_db", None)
+        # FIXED HIGH-05: используем публичное свойство .db вместо getattr(_db)
+        db_obj = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
         if isinstance(db_obj, DatabaseManager):
             db = db_obj  # Используем один DatabaseManager для транзакции
             with db.transaction() as conn:
@@ -477,7 +478,8 @@ class AppointmentService:
     def get_blacklist(self) -> list[int]:
         """Возвращает список заблокированных user_id."""
         try:
-            db = getattr(self._appointment_repo, "_db", None)
+            # FIXED HIGH-05: используем публичное .db свойство
+            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
             if db is None:
                 return []
             with db.read_connection() as conn:
@@ -498,11 +500,11 @@ class AppointmentService:
         """Помечает запись как выполненную (клиент пришёл).
 
         FIXED BUG-C1: заменён несуществующий метод write_connection() на transaction().
-        Также испр��влен SQL: колонки 'status' нет в схеме, используем is_cancelled=0 (запись активна/выполнена).
-        Добавляем маркер через comment или просто логируем факт выполнения.
+        FIXED HIGH-05: используем .db публичное свойство вместо getattr(_db).
         """
         try:
-            db = getattr(self._appointment_repo, "_db", None)
+            # FIXED HIGH-05: публичное свойство .db вместо getattr(_db)
+            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
             if db is None:
                 logger.warning("mark_completed: no DB reference found, skipping for appointment #%s", appointment_id)
                 return

@@ -98,6 +98,14 @@ class DatabaseManager:
                 except Exception:
                     pass
             finally:
+                # FIXED CRIT-03: явно сбрасываем instance._initialized, иначе instance-атрибут
+                # остаётся True даже после cls._initialized = False и следующая инициализация
+                # с тем же/другим путём пропустит __init__ из-за проверки self._initialized.
+                if instance is not None:
+                    try:
+                        instance._initialized = False
+                    except Exception:
+                        pass
                 cls._instance = None
                 cls._initialized = False
 

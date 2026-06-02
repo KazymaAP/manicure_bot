@@ -242,9 +242,12 @@ class ReminderService:
         Используем appointment_service._appointment_repo._db (DatabaseManager) для доступа.
         """
         try:
-            db = getattr(self._appointment_service, "_appointment_repo", None)
-            if db is not None:
-                db = getattr(db, "_db", None)
+            # FIXED HIGH-05: используем .db публичное свойство вместо getattr(_db)
+            repo = getattr(self._appointment_service, "_appointment_repo", None)
+            if repo is not None:
+                db = getattr(repo, "db", None) or getattr(repo, "_db", None)
+            else:
+                db = None
             if db is None:
                 return {"notifications_enabled": 1}
             with db.read_connection() as conn:
