@@ -15,7 +15,7 @@ import os
 import sqlite3
 import threading
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 logger = logging.getLogger(__name__)
 
@@ -81,19 +81,15 @@ class DatabaseManager:
                     connections = getattr(instance, '_connections', {})
                     if connections_lock:
                         with connections_lock:
-                            for tid, conn in list(connections.items()):
-                                try:
+                            for _tid, conn in list(connections.items()):
+                                with suppress(Exception):
                                     conn.close()
-                                except Exception:
-                                    pass
                             connections.clear()
                 # Очищаем thread-local соединение текущего потока
                 try:
                     if hasattr(cls._thread_local, 'conn') and cls._thread_local.conn:
-                        try:
+                        with suppress(Exception):
                             cls._thread_local.conn.close()
-                        except Exception:
-                            pass
                         cls._thread_local.conn = None
                 except Exception:
                     pass
@@ -102,10 +98,8 @@ class DatabaseManager:
                 # остаётся True даже после cls._initialized = False и следующая инициализация
                 # с тем же/другим путём пропустит __init__ из-за проверки self._initialized.
                 if instance is not None:
-                    try:
+                    with suppress(Exception):
                         instance._initialized = False
-                    except Exception:
-                        pass
                 cls._instance = None
                 cls._initialized = False
 
@@ -120,7 +114,7 @@ class DatabaseManager:
             with open(test_file, "w") as f:
                 f.write("")
             os.remove(test_file)
-        except (OSError, IOError) as e:
+        except OSError as e:
             raise RuntimeError(
                 f"Cannot create or write to database directory {directory!r}: {e}. Check directory permissions and volume mounts (Docker)."
             ) from e

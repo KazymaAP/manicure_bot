@@ -13,15 +13,15 @@ from src.domain.models.appointment import Appointment
 
 
 def make_appointment(**kwargs) -> Appointment:
-    defaults = dict(
-        id=1,
-        user_id=123,
-        client_name="Тест Тестов",
-        phone="+79991234567",
-        date="2026-12-01",
-        time="10:00",
-        status=AppointmentStatus.ACTIVE,
-    )
+    defaults = {
+        "id": 1,
+        "user_id": 123,
+        "client_name": "Тест Тестов",
+        "phone": "+79991234567",
+        "date": "2026-12-01",
+        "time": "10:00",
+        "status": AppointmentStatus.ACTIVE,
+    }
     defaults.update(kwargs)
     return Appointment(**defaults)
 

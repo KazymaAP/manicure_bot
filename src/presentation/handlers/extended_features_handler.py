@@ -12,15 +12,18 @@ FIXED: обработчики для функций которые ещё не �
 """
 
 import logging
-from datetime import date as _date, datetime
+from datetime import date as _date
+from datetime import datetime
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+
 from src.config.dependencies import Container
-from src.domain.enums.fsm_states import BookingFSM, AdminFSM
+from src.domain.enums.fsm_states import AdminFSM, BookingFSM
 from src.presentation.formatters.message_formatter import MessageFormatter
-from src.presentation.keyboards.main_menu import MainMenuKeyboard
 from src.presentation.keyboards.admin import AdminKeyboard
+from src.presentation.keyboards.main_menu import MainMenuKeyboard
 
 logger = logging.getLogger(__name__)
 router = Router(name="extended_features")
@@ -32,7 +35,6 @@ def setup_extended_features_router(container: Container) -> Router:
     appt_service = container.appointment_service
     sched_service = container.schedule_service
     notif_service = container.notification_service
-    settings = container.settings
 
     # ═══════════════════════════════════════════════════════════════════════
     # КЛИЕНТСКИЕ ФУНКЦИИ
@@ -167,7 +169,9 @@ def setup_extended_features_router(container: Container) -> Router:
             return
 
         from src.application.dto.booking_dto import CreateBookingDTO
-        from src.domain.exceptions.appointment import SlotAlreadyBookedError, MaxAppointmentsReachedError
+        from src.domain.exceptions.appointment import (
+            SlotAlreadyBookedError,
+        )
 
         try:
             # FIXED C-6: Правильный порядок переноса (атомарный подход):

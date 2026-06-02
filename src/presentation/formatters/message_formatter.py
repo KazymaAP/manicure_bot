@@ -5,12 +5,12 @@ src/presentation/formatters/message_formatter.py — Форматировани�
 Все тексты читаются из config.json при наличии, иначе используются встроенные значения.
 """
 
-from datetime import datetime
-from typing import Any
 import html
-import os
 import json
+import os
+from datetime import datetime
 from functools import lru_cache
+from typing import Any
 
 from src.domain.models.appointment import Appointment
 from src.domain.models.time_slot import TimeSlot

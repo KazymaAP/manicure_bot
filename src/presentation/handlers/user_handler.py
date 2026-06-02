@@ -7,7 +7,7 @@ src/presentation/handlers/user_handler.py — FSM-обработчики для 
 
 import logging
 import re
-from datetime import date as _date, datetime as _datetime
+from datetime import date as _date
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -15,11 +15,14 @@ from aiogram.types import CallbackQuery, Message
 
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import BookingFSM
-
+from src.domain.exceptions.appointment import (
+    AppointmentAlreadyCancelledError as _ApptAlreadyCancelledError,
+)
+from src.domain.exceptions.appointment import (
+    AppointmentNotFoundError as _ApptNotFoundError,
+)
 from src.domain.exceptions.appointment import (
     SlotAlreadyBookedError,
-    AppointmentAlreadyCancelledError as _ApptAlreadyCancelledError,
-    AppointmentNotFoundError as _ApptNotFoundError,
 )
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.handlers.common_handler import _get_portfolio
@@ -365,7 +368,10 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         except SlotAlreadyBookedError:
             await callback.message.answer(MessageFormatter.slot_already_taken())
         except Exception as exc:
-            from src.domain.exceptions.appointment import MaxAppointmentsReachedError, BlacklistedUserError
+            from src.domain.exceptions.appointment import (
+                BlacklistedUserError,
+                MaxAppointmentsReachedError,
+            )
             if isinstance(exc, BlacklistedUserError):
                 await callback.message.answer(MessageFormatter.user_blocked())
             elif isinstance(exc, MaxAppointmentsReachedError):

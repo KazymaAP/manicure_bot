@@ -5,11 +5,11 @@ Unit-тесты для ScheduleService.
 from __future__ import annotations
 
 from datetime import date, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.application.dto.booking_dto import AddWorkingDayDTO, AddSlotDTO
+from src.application.dto.booking_dto import AddSlotDTO, AddWorkingDayDTO
 from src.application.services.schedule_service import ScheduleService
 from src.domain.exceptions.schedule import (
     PastDateError,

@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 logger = logging.getLogger(__name__)
 

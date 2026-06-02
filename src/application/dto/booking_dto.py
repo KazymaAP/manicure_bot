@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date as _date, datetime as _datetime
+from datetime import date as _date
+from datetime import datetime as _datetime
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TIME_RE = re.compile(r"^\d{2}:\d{2}$")

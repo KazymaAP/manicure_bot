@@ -22,7 +22,7 @@ class AppointmentStatus(IntEnum):
     COMPLETED = 2
 
     @classmethod
-    def from_db_value(cls, value: int | None) -> "AppointmentStatus":
+    def from_db_value(cls, value: int | None) -> AppointmentStatus:
         """Безопасно создаёт статус из значения БД.
 
         Неизвестные значения возвращают ACTIVE как fallback, что предотвращает

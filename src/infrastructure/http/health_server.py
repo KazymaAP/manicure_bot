@@ -39,7 +39,7 @@ class HealthServer:
 
     def __init__(
         self,
-        appointment_service: "AppointmentService",
+        appointment_service: AppointmentService,
         port: int = 8080,
         metrics_token: str | None = None,
         bind_host: str = "127.0.0.1",
@@ -60,7 +60,7 @@ class HealthServer:
         self.runner: web.AppRunner | None = None
         self._start_time = datetime.now(tz=timezone.utc)
 
-    def _check_metrics_auth(self, request: "web.Request") -> bool:
+    def _check_metrics_auth(self, request: web.Request) -> bool:
         """Проверяет Bearer-токен для /metrics.
 
         Если METRICS_TOKEN задан — проверяем Authorization: Bearer <token> (constant-time).
@@ -105,7 +105,7 @@ class HealthServer:
             await self.runner.cleanup()
             logger.info("Health server stopped")
 
-    async def _handle_health(self, request: "web.Request") -> "web.Response":
+    async def _handle_health(self, request: web.Request) -> web.Response:
         """Handler для GET /health — публичный ping."""
         now = datetime.now(tz=timezone.utc)
         uptime = int((now - self._start_time).total_seconds())
@@ -117,7 +117,7 @@ class HealthServer:
             }
         )
 
-    async def _handle_metrics(self, request: "web.Request") -> "web.Response":
+    async def _handle_metrics(self, request: web.Request) -> web.Response:
         """Handler для GET /metrics — статистика, защищена аутентификацией."""
         if not self._check_metrics_auth(request):
             return web.json_response(
@@ -143,7 +143,7 @@ class HealthServer:
                     },
                 }
             )
-        except Exception as exc:
+        except Exception:
             logger.exception("Error in /metrics handler")
             return web.json_response(
                 {"status": "error", "message": "Internal server error"},
@@ -151,6 +151,6 @@ class HealthServer:
             )
 
     @staticmethod
-    async def _handle_not_found(request: "web.Request") -> "web.Response":
+    async def _handle_not_found(request: web.Request) -> web.Response:
         """Handler для неизвестных путей."""
         return web.json_response({"status": "not_found"}, status=404)

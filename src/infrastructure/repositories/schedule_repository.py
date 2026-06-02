@@ -301,7 +301,7 @@ class ScheduleRepository(BaseRepository):
         try:
             from datetime import datetime
             fmt = "%H:%M"
-            start_dt = datetime.strptime(time, fmt)
+            datetime.strptime(time, fmt)
         except Exception:
             return False
 
@@ -450,7 +450,7 @@ class ScheduleRepository(BaseRepository):
 
     def get_workday_template(self, template_id: int) -> dict | None:
         """Возвращает конкретный шаблон.
-        
+
         FIXED: используется правильное имя колонки `slots` вместо `schedule`.
         """
         with self._db.read_connection() as conn:

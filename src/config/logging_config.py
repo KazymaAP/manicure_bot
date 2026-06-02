@@ -74,7 +74,7 @@ def setup_logging(log_level: str = "INFO", log_file: str | None = None) -> None:
             file_handler.setLevel(level)
             root_logger.addHandler(file_handler)
             root_logger.debug("File logging enabled: %s (max %dMB × %d)", log_file, _MAX_BYTES // 1024 // 1024, _BACKUP_COUNT)
-        except (OSError, IOError) as exc:
+        except OSError as exc:
             root_logger.warning("Failed to open log file %r: %s", log_file, exc)
 
     # ── Тишина от сторонних библиотек ────────────────────────────────────

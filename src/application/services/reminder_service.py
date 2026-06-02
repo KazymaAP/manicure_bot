@@ -51,8 +51,8 @@ class ReminderService:
 
         # Инициализация планировщика: предпочитаем SQLAlchemyJobStore (персистентность), иначе MemoryJobStore
         try:
-            from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
             from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore  # type: ignore
+            from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
         except Exception as exc:
             # FIXED: понятная ошибка при отсутствии APScheduler/SQLAlchemy
             raise RuntimeError(
@@ -305,7 +305,8 @@ class ReminderService:
             import csv
             import io
             import os
-            from datetime import date as _date, timedelta
+            from datetime import date as _date
+            from datetime import timedelta
 
             cutoff_date = (_date.today() - timedelta(days=90)).isoformat()
             all_appts = await asyncio.to_thread(self._appointment_service.get_all)
@@ -361,8 +362,9 @@ class ReminderService:
         Если schedule_service не передан — graceful fallback с предупреждением.
         """
         try:
-            from datetime import date as _date, timedelta
             import asyncio
+            from datetime import date as _date
+            from datetime import timedelta
 
             today = _date.today()
             days_ahead = 30

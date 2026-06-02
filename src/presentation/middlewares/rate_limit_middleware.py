@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +42,7 @@ class RateLimitMiddleware(BaseMiddleware):
             # FIXED BUG-08: в aiogram 3.x event в middleware уже является конкретным типом
             # (Message, CallbackQuery и т.д.), а не Update. Используем isinstance() для
             # правильного извлечения user_id вместо неработающего update.message.from_user.id.
-            if isinstance(event, Message):
-                if event.from_user is not None:
-                    user_id = event.from_user.id
-            elif isinstance(event, CallbackQuery):
+            if isinstance(event, Message | CallbackQuery):
                 if event.from_user is not None:
                     user_id = event.from_user.id
             else:

@@ -365,7 +365,7 @@ class AppointmentRepository(BaseRepository):
                 """,
                 (f"{year:04d}", f"{month:02d}"),
             ).fetchone()
-            
+
             # Популярные дни недели
             weekday_stats = conn.execute(
                 """
@@ -379,7 +379,7 @@ class AppointmentRepository(BaseRepository):
                 """,
                 (f"{year:04d}", f"{month:02d}"),
             ).fetchall()
-            
+
             # Пиковые часы
             peak_hours = conn.execute(
                 """
@@ -394,7 +394,7 @@ class AppointmentRepository(BaseRepository):
                 """,
                 (f"{year:04d}", f"{month:02d}"),
             ).fetchall()
-        
+
         return {
             "total": dict(month_stats)["total"] if month_stats else 0,
             "confirmed": dict(month_stats)["confirmed"] if month_stats else 0,

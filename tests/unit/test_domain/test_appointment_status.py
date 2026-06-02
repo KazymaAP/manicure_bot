@@ -4,8 +4,6 @@ Unit-тесты для AppointmentStatus enum.
 """
 from __future__ import annotations
 
-import pytest
-
 from src.domain.enums.appointment_status import AppointmentStatus
 
 

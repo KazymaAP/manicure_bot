@@ -6,23 +6,24 @@ src/presentation/handlers/admin_handler.py — Административная 
 поиск клиентов, уведомление за 2 часа до первой записи.
 """
 
-import logging
-import re
 import asyncio
+import contextlib
 import json
+import logging
 import os
+import re
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, BufferedInputFile
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from src.config.dependencies import Container
-from src.domain.exceptions.appointment import (
-    AppointmentNotFoundError,
-    AppointmentAlreadyCancelledError,
-)
 from src.domain.enums.fsm_states import AdminFSM
+from src.domain.exceptions.appointment import (
+    AppointmentAlreadyCancelledError,
+    AppointmentNotFoundError,
+)
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.admin import AdminKeyboard
 
@@ -118,10 +119,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
             if appt:
                 # Пытаемся отметить как выполненную (если метод есть)
-                try:
+                import contextlib
+                with contextlib.suppress(AttributeError):
                     await asyncio.to_thread(appt_service.mark_completed, appt_id)
-                except AttributeError:
-                    pass  # Метод не реализован — просто уведомляем
                 await callback.message.edit_text(
                     f"✅ {appt.client_name} ({appt.time}) — отмечена как пришедшая",
                     reply_markup=None,
@@ -172,13 +172,13 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not appointments:
             await callback.message.edit_text(MessageFormatter.admin_appointments_empty())
         else:
-            PAGE_SIZE = 20
-            page_appts = appointments[:PAGE_SIZE]
+            page_size = 20
+            page_appts = appointments[:page_size]
             total = len(appointments)
             filter_label = filter_names.get(filter_key, filter_key)
             text = MessageFormatter.admin_appointments_list(page_appts, filter_name=filter_label)
-            if total > PAGE_SIZE:
-                text += f"\n\n<i>Показано {PAGE_SIZE} из {total} записей.</i>"
+            if total > page_size:
+                text += f"\n\n<i>Показано {page_size} из {total} записей.</i>"
             try:
                 await callback.message.edit_text(text, parse_mode="HTML")
             except Exception:
@@ -257,10 +257,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             logger.error("Ошибка отмены записи #%s: %s", appt_id, exc)
             await callback.message.edit_text(MessageFormatter.error_general())
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await state.clear()
-            except Exception:
-                pass
             await callback.answer()
 
     @router.callback_query(F.data.startswith("admin_cancel_abort:"))
@@ -703,7 +701,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
     def _get_master_name() -> str:
         """FIXED HIGH-02: читает имя мастера из config.json вместо хардкода.
-        
+
         Возвращает имя из config.json['master']['name'], иначе 'Мастер'.
         """
         try:
@@ -870,10 +868,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                     logger.error("Ошибка обновления config.json: %s", exc)
                     # Удаляем временный файл если он остался
                     if tmp_path and os.path.exists(tmp_path):
-                        try:
+                        with contextlib.suppress(Exception):
                             os.unlink(tmp_path)
-                        except Exception:
-                            pass
                     await message.answer(MessageFormatter.error_general())
             return
 
@@ -1054,7 +1050,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data == "admin_broadcast_send")
     async def admin_broadcast_send(callback: CallbackQuery, state: FSMContext) -> None:
         """FIXED CRIT-05: рассылка запускается как фоновая задача (asyncio.create_task).
-        
+
         Это предотвращает блокировку event loop на 50+ секунд при 1000+ пользователях.
         Задержка увеличена с 0.05с до 0.04с (соответствует лимиту Telegram ~25 msg/sec с запасом).
         Ссылка на задачу сохраняется в _broadcast_tasks для предотвращения преждевременной
@@ -1108,10 +1104,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 )
             except Exception as exc:
                 logger.error("Ошибка рассылки: %s", exc)
-                try:
+                with contextlib.suppress(Exception):
                     await callback.message.answer(MessageFormatter.error_general())
-                except Exception:
-                    pass
 
         # FIXED CRIT-05: запускаем как asyncio.create_task() — не блокируем event loop
         task = asyncio.create_task(_do_broadcast())

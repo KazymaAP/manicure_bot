@@ -10,10 +10,19 @@ FIXED: все оставшиеся функции:
 """
 
 import logging
-from datetime import date as _date, datetime, timedelta
+from datetime import date as _date
+from datetime import datetime, timedelta
+
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
+from aiogram.types import (
+    CallbackQuery,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    Message,
+)
+
 from src.config.dependencies import Container
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
@@ -147,8 +156,9 @@ def setup_final_features_router(container: Container) -> Router:
     @router.message(F.text == "🔔 Уведомления")
     async def manage_notifications(message: Message) -> None:
         """FIXED BUG-09: фича #49 — управление уведомлениями и напоминаниями."""
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
         import asyncio
+
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
         user_id = message.from_user.id
         # Получаем текущие настройки из БД

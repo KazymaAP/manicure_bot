@@ -6,7 +6,7 @@ Unit-тесты для AppointmentService.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,7 +22,6 @@ from src.domain.exceptions.appointment import (
 )
 from src.domain.models.appointment import Appointment
 from src.infrastructure.database.connection import DatabaseManager  # noqa: F401 — used in conftest
-
 
 # ── Фикстуры ──────────────────────────────────────────────────────────────────
 
@@ -56,27 +55,27 @@ def service(mock_appointment_repo: MagicMock, mock_schedule_repo: MagicMock) -> 
 
 
 def make_dto(**kwargs) -> CreateBookingDTO:
-    defaults = dict(
-        user_id=123,
-        client_name="Тест",
-        phone="+79991234567",
-        date="2026-12-01",
-        time="10:00",
-    )
+    defaults = {
+        "user_id": 123,
+        "client_name": "Тест",
+        "phone": "+79991234567",
+        "date": "2026-12-01",
+        "time": "10:00",
+    }
     defaults.update(kwargs)
     return CreateBookingDTO(**defaults)
 
 
 def make_appointment(**kwargs) -> Appointment:
-    defaults = dict(
-        id=1,
-        user_id=123,
-        client_name="Тест",
-        phone="+79991234567",
-        date="2026-12-01",
-        time="10:00",
-        status=AppointmentStatus.ACTIVE,
-    )
+    defaults = {
+        "id": 1,
+        "user_id": 123,
+        "client_name": "Тест",
+        "phone": "+79991234567",
+        "date": "2026-12-01",
+        "time": "10:00",
+        "status": AppointmentStatus.ACTIVE,
+    }
     defaults.update(kwargs)
     return Appointment(**defaults)
 
@@ -246,7 +245,7 @@ class TestReadAppointments:
         self, service: AppointmentService, mock_appointment_repo: MagicMock
     ) -> None:
         mock_appointment_repo.get_all.return_value = []
-        result = service.get_appointments_filtered("all")
+        service.get_appointments_filtered("all")
         mock_appointment_repo.get_all.assert_called_once()
 
 

@@ -10,7 +10,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.domain.models.time_slot import TimeSlot
 
-
 # Эмодзи для автоматического определения типа услуги
 _SERVICE_EMOJIS = {
     "маникюр": "💅", "педикюр": "🦶", "покрытие": "✨",

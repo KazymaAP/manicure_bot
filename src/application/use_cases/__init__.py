@@ -10,8 +10,8 @@ FIXED H-06: директория была пустой, нарушая заяв�
 """
 
 from src.application.use_cases.booking_use_cases import (
-    CreateBookingUseCase,
     CancelBookingUseCase,
+    CreateBookingUseCase,
     GetUserAppointmentsUseCase,
 )
 

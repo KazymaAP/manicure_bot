@@ -5,17 +5,17 @@ src/presentation/handlers/common_handler.py — Общие обработчик�
 контактная информация, кнопка «Связаться с мастером».
 """
 
+import contextlib
 import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
 from src.config.dependencies import Container
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
-from src.presentation.keyboards.booking import BookingKeyboard
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +197,7 @@ def setup_common_router(container: Container) -> Router:
 
         # Кнопка "Написать мастеру" если есть username
         if master_username:
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
                     text="✉️ Написать мастеру",
@@ -232,13 +232,11 @@ def setup_common_router(container: Container) -> Router:
         await state.clear()
         is_admin = callback.from_user.id in settings.admin_ids
         portfolio = _get_portfolio(settings)
-        try:
+        with contextlib.suppress(Exception):
             await callback.message.edit_text(
                 MessageFormatter.main_menu_title(),
                 reply_markup=None,
             )
-        except Exception:
-            pass
         await callback.message.answer(
             MessageFormatter.main_menu_title(),
             reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),

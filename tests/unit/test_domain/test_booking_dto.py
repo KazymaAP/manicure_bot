@@ -4,6 +4,8 @@ Unit-тесты для CreateBookingDTO и других DTO.
 """
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from src.application.dto.booking_dto import (
@@ -15,13 +17,13 @@ from src.application.dto.booking_dto import (
 
 
 def make_valid_dto(**kwargs) -> CreateBookingDTO:
-    defaults = dict(
-        user_id=123,
-        client_name="Тест Тестов",
-        phone="+79991234567",
-        date="2026-12-01",
-        time="10:00",
-    )
+    defaults = {
+        "user_id": 123,
+        "client_name": "Тест Тестов",
+        "phone": "+79991234567",
+        "date": "2026-12-01",
+        "time": "10:00",
+    }
     defaults.update(kwargs)
     return CreateBookingDTO(**defaults)
 
@@ -127,7 +129,7 @@ class TestCreateBookingDTO:
     def test_frozen_immutable(self) -> None:
         """DTO должен быть неизменяемым (frozen=True)."""
         dto = make_valid_dto()
-        with pytest.raises(Exception):
+        with pytest.raises((AttributeError, TypeError, dataclasses.FrozenInstanceError)):
             dto.user_id = 999  # type: ignore[misc]
 
 
@@ -144,7 +146,7 @@ class TestBookingResultDTO:
 
     def test_frozen(self) -> None:
         result = BookingResultDTO(appointment_id=1, client_name="X", date="2026-12-01", time="10:00")
-        with pytest.raises(Exception):
+        with pytest.raises((AttributeError, TypeError, dataclasses.FrozenInstanceError)):
             result.appointment_id = 2  # type: ignore[misc]
 
 

@@ -60,13 +60,12 @@ class TestDatabaseManagerTransactions:
 
     def test_transaction_rollback_on_exception(self, db: DatabaseManager) -> None:
         """При исключении внутри транзакции данные откатываются."""
-        with pytest.raises(ValueError):
-            with db.transaction() as conn:
-                conn.execute(
-                    "INSERT INTO working_days (date, is_closed) VALUES (?, ?)",
-                    ("2026-12-02", 0),
-                )
-                raise ValueError("Intentional rollback")
+        with pytest.raises(ValueError), db.transaction() as conn:
+            conn.execute(
+                "INSERT INTO working_days (date, is_closed) VALUES (?, ?)",
+                ("2026-12-02", 0),
+            )
+            raise ValueError("Intentional rollback")
 
         with db.read_connection() as conn:
             row = conn.execute(

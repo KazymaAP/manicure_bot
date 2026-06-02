@@ -63,8 +63,8 @@ class ScheduleService:
         """
         try:
             d = _date.fromisoformat(dto.date)
-        except ValueError:
-            raise ValueError(f"Invalid date format: {dto.date!r}, expected YYYY-MM-DD")
+        except ValueError as exc:
+            raise ValueError(f"Invalid date format: {dto.date!r}, expected YYYY-MM-DD") from exc
 
         if d < _date.today():
             raise PastDateError(dto.date)
@@ -204,12 +204,17 @@ class ScheduleService:
 
         Raises:
             ValueError: Если формат времени некорректен.
+            WorkingDayNotFoundError: Если рабочий день не существует.
         """
         if not _TIME_RE.match(dto.time):
             raise ValueError(f"Invalid time format: {dto.time!r}, expected HH:MM")
         h, m = map(int, dto.time.split(":"))
         if not (0 <= h < 24 and 0 <= m < 60):
             raise ValueError(f"Time out of range: {dto.time!r}")
+
+        # FIXED: проверяем существование рабочего дня перед добавлением слота
+        if not self._schedule_repo.is_working_day(dto.date):
+            raise WorkingDayNotFoundError(dto.date)
 
         return self._schedule_repo.add_time_slot(dto.date, dto.time)
 
@@ -229,7 +234,7 @@ class ScheduleService:
 
     async def get_available_dates_async(self) -> list[str]:
         """Async-обёртка: возвращает список доступных дат.
-        
+
         FIXED: обвёрнут синхронный SQL-запрос в asyncio.to_thread чтобы не блокировать event loop.
         """
         result = await asyncio.to_thread(
@@ -241,7 +246,7 @@ class ScheduleService:
 
     async def get_available_slots(self, date_str: str) -> list[TimeSlot]:
         """Async-обёртка для get_free_slots.
-        
+
         FIXED: обвёрнут синхронный SQL-запрос в asyncio.to_thread чтобы не блокировать event loop.
         """
         return await asyncio.to_thread(self._schedule_repo.get_free_slots, date_str)
@@ -264,7 +269,8 @@ class ScheduleService:
 
     def get_nearest_free_slots(self, limit: int = 5) -> list[tuple[str, str]]:
         """Возвращает ближайшие свободные слоты (date, time) в пределах horizon."""
-        from datetime import date as _date, timedelta
+        from datetime import date as _date
+        from datetime import timedelta
 
         result: list[tuple[str, str]] = []
         today = _date.today()
@@ -365,7 +371,8 @@ class ScheduleService:
         Ранее admin_handler проверял hasattr(sched_service, 'count_free_slots') —
         метод отсутствовал, free_slots всегда был 0 в дашборде.
         """
-        from datetime import date as _date, timedelta
+        from datetime import date as _date
+        from datetime import timedelta
 
         today = _date.today()
         to_date = today + timedelta(days=self._days_ahead)

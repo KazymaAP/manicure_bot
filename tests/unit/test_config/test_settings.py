@@ -10,7 +10,7 @@ from contextlib import contextmanager
 import pytest
 from pydantic import ValidationError
 
-from src.config.settings import Settings, get_settings
+from src.config.settings import Settings
 
 
 @contextmanager
@@ -35,10 +35,10 @@ def env_override(**kwargs):
 
 def make_settings(**kwargs) -> Settings:
     """Создаёт Settings с тестовыми значениями."""
-    defaults = dict(
-        BOT_TOKEN="1234567890:ABCDefGhIJKlmnoPQRStuvwXYZ",
-        ADMIN_IDS="123456789",
-    )
+    defaults = {
+        "BOT_TOKEN": "1234567890:ABCDefGhIJKlmnoPQRStuvwXYZ",
+        "ADMIN_IDS": "123456789",
+    }
     defaults.update(kwargs)
     with env_override(**defaults):
         return Settings()

@@ -165,8 +165,9 @@ class NotificationService:
         Returns:
             True если напоминание успешно отправлено.
         """
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
         import asyncio
+
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
         # FIXED: используем карточное напоминание с деталями визита и кнопками
         appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         client_name = appt.client_name if appt else ""
@@ -269,7 +270,7 @@ class NotificationService:
             except Exception as exc:
                 # FIXED H-7: обработка flood control (429 Too Many Requests)
                 try:
-                    from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
+                    from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
                     if isinstance(exc, TelegramRetryAfter):
                         retry_after = getattr(exc, "retry_after", 5)
                         logger.warning(

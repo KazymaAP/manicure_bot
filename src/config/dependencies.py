@@ -143,7 +143,7 @@ class Container:
             """
             import asyncio
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
             except RuntimeError:
                 # Нет running loop — в тесте или в синхронном контексте
                 return

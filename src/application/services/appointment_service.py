@@ -9,9 +9,10 @@ Async-хендлеры вызывают их напрямую (sync в async con
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime as _datetime, timedelta
-from typing import Callable
 import sqlite3
+from collections.abc import Callable
+from datetime import date, timedelta
+from datetime import datetime as _datetime
 
 from src.application.dto.booking_dto import BookingResultDTO, CreateBookingDTO
 from src.domain.exceptions import AppointmentNotFoundError
