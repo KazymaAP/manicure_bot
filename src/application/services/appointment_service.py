@@ -495,19 +495,37 @@ class AppointmentService:
         self.unblock_user(user_id)
 
     def mark_completed(self, appointment_id: int) -> None:
-        """Помечает запись как выполненную (клиент пришёл)."""
+        """Помечает запись как выполненную (клиент пришёл).
+
+        FIXED BUG-C1: заменён несуществующий метод write_connection() на transaction().
+        Также испр��влен SQL: колонки 'status' нет в схеме, используем is_cancelled=0 (запись активна/выполнена).
+        Добавляем маркер через comment или просто логируем факт выполнения.
+        """
         try:
             db = getattr(self._appointment_repo, "_db", None)
             if db is None:
+                logger.warning("mark_completed: no DB reference found, skipping for appointment #%s", appointment_id)
                 return
-            with db.write_connection() as conn:
-                conn.execute(
-                    "UPDATE appointments SET status = 'completed' WHERE id = ?",
+            # FIXED BUG-C1: используем transaction() вместо несуществующего write_connection()
+            with db.transaction() as conn:
+                # Добавляем метку в поле comment (колонки 'status' нет в схеме)
+                # Сначала получаем текущий comment чтобы не затереть его
+                row = conn.execute(
+                    "SELECT comment FROM appointments WHERE id = ?",
                     (appointment_id,)
-                )
+                ).fetchone()
+                if row is not None:
+                    current_comment = row[0] or ""
+                    completed_marker = "[✅ Пришла]"
+                    if completed_marker not in current_comment:
+                        new_comment = (current_comment + " " + completed_marker).strip()
+                        conn.execute(
+                            "UPDATE appointments SET comment = ? WHERE id = ?",
+                            (new_comment, appointment_id)
+                        )
+            logger.info("Appointment #%s marked as completed (arrived)", appointment_id)
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "Could not mark appointment #%s as completed: %s", appointment_id, exc
             )
 

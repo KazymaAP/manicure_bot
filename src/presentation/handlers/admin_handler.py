@@ -357,7 +357,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
 
         text = message.text.strip()
-        if not re.match(r"^\d{4}[-.]\\d{2}[-.]\\d{2}$", text) and not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        if not re.match(r"^\d{4}[-.]\d{2}[-.]\d{2}$", text) and not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
             await message.answer(MessageFormatter.admin_invalid_date_format())
             return
 
@@ -1183,33 +1183,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.message.edit_text(MessageFormatter.error_general())
         await callback.answer()
 
-    # ── Статистика по месяцам ─────────────────────────────────────────────
-    @router.callback_query(F.data == "admin_monthly_stats")
-    async def admin_monthly_stats(callback: CallbackQuery) -> None:
-        if not _is_admin(callback.from_user.id):
-            await callback.answer()
-            return
-        try:
-            appointments = await asyncio.to_thread(appt_service.get_appointments_filtered, "all")
-            from collections import Counter
-            months = Counter()
-            for appt in appointments:
-                if not getattr(appt, 'is_cancelled', False):
-                    try:
-                        month = appt.date[:7]  # YYYY-MM
-                        months[month] += 1
-                    except Exception:
-                        pass
-            if not months:
-                await callback.message.edit_text("📊 Нет данных для статистики.")
-                return
-            lines = ["📊 <b>Записи по месяцам:</b>\n"]
-            for month, count in sorted(months.items(), reverse=True)[:12]:
-                lines.append(f"📅 {month}: <b>{count}</b> записей")
-            await callback.message.edit_text("\n".join(lines), parse_mode="HTML")
-        except Exception as exc:
-            logger.error("Ошибка статистики: %s", exc)
-            await callback.message.edit_text(MessageFormatter.error_general())
-        await callback.answer()
+    # NOTE: admin_monthly_stats handler removed from here — the more complete version
+    # (with weekday breakdown and peak hours analysis) lives in extended_features_handler.py
 
     return router
