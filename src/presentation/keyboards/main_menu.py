@@ -1,12 +1,13 @@
 """
 src/presentation/keyboards/main_menu.py — Клавиатуры главного меню.
 
-✅ Из v2_tar: MainMenuKeyboard class с static methods
+Обновлено: 4 кнопки для клиента — «Записаться», «Мои записи», «Цены», «Связаться с мастером».
+Тёплый, простой интерфейс без лишних элементов.
 """
 from __future__ import annotations
 
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
 
 class MainMenuKeyboard:
@@ -14,39 +15,39 @@ class MainMenuKeyboard:
 
     @staticmethod
     def main(is_admin: bool = False, portfolio_url: str | None = None) -> ReplyKeyboardMarkup:
-        """Главное меню пользователя.
-
-        Args:
-            is_admin: Если True, добавляет админ кнопку.
-            portfolio_url: Ссылка на портфолио (если задана — добавляет кнопку).
+        """
+        Главное меню клиента.
+        Основные 4 кнопки: Записаться, Мои записи, Цены, Связаться с мастером.
         """
         builder = ReplyKeyboardBuilder()
-        builder.row(KeyboardButton(text="📅 Записаться"), KeyboardButton(text="📋 Мои записи"))
-        builder.row(KeyboardButton(text="📆 Расписание"), KeyboardButton(text="🔔 Ближайшие слоты"))
-        builder.row(KeyboardButton(text="📞 Контакты"), KeyboardButton(text="💰 Цены"))
-        builder.row(KeyboardButton(text="📤 Поделиться"), KeyboardButton(text="🔔 Уведомления"))
+        # Первая строка — самые важные действия
+        builder.row(
+            KeyboardButton(text="💅 Записаться"),
+            KeyboardButton(text="📋 Мои записи")
+        )
+        # Вторая строка — информация
+        builder.row(
+            KeyboardButton(text="💰 Цены"),
+            KeyboardButton(text="📞 Связаться с мастером")
+        )
+        # Портфолио (если задано)
         if portfolio_url:
             builder.row(
-                KeyboardButton(text="💅 Портфолио", web_app=WebAppInfo(url=portfolio_url))
+                KeyboardButton(text="🖼 Портфолио", web_app=WebAppInfo(url=portfolio_url))
             )
+        # Кнопка администратора — только для мастера
         if is_admin:
             builder.row(KeyboardButton(text="⚙️ Админ-панель"))
         return builder.as_markup(resize_keyboard=True)
 
     @staticmethod
-    def subscribe(channel_link: str):
-        """FIXED: Возвращает Inline-кнопку с прямой ссылкой на канал и кнопку "Я подписался" для удобного UX.
-
-        Возвращаем InlineKeyboardMarkup (совместимо с ожиданиями UI):
-        """
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
+    def subscribe(channel_link: str) -> InlineKeyboardMarkup:
+        """Кнопка подписки на канал с последующей проверкой."""
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Подписаться", url=channel_link)],
-            [InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription")],
+            [InlineKeyboardButton(text="✅ Я подписалась", callback_data="check_subscription")],
         ])
         return kb
-        # FIXED: добавлена callback-кнопка проверки подписки (повторная проверка при нажатии)
 
     @staticmethod
     def back_to_main() -> ReplyKeyboardMarkup:
@@ -54,3 +55,10 @@ class MainMenuKeyboard:
         builder = ReplyKeyboardBuilder()
         builder.row(KeyboardButton(text="🏠 Главное меню"))
         return builder.as_markup(resize_keyboard=True)
+
+    @staticmethod
+    def book_again() -> InlineKeyboardMarkup:
+        """Кнопка 'Записаться снова' после визита."""
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="💅 Записаться снова", callback_data="book_again"))
+        return builder.as_markup()

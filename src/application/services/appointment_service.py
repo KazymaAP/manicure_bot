@@ -472,3 +472,43 @@ class AppointmentService:
         """
         return self._appointment_repo.delete_by_ids(appointment_ids)
 
+    # ── Методы-обёртки для admin_handler ──────────────────────────────────
+
+    def get_blacklist(self) -> list[int]:
+        """Возвращает список заблокированных user_id."""
+        try:
+            db = getattr(self._appointment_repo, "_db", None)
+            if db is None:
+                return []
+            with db.read_connection() as conn:
+                rows = conn.execute("SELECT user_id FROM blacklist").fetchall()
+                return [row[0] for row in rows]
+        except Exception:
+            return []
+
+    def add_to_blacklist(self, user_id: int, reason: str = "Заблокирован администратором") -> None:
+        """Псевдоним для block_user с дефолтной причиной."""
+        self.block_user(user_id, reason)
+
+    def remove_from_blacklist(self, user_id: int) -> None:
+        """Псевдоним для unblock_user."""
+        self.unblock_user(user_id)
+
+    def mark_completed(self, appointment_id: int) -> None:
+        """Помечает запись как выполненную (клиент пришёл)."""
+        try:
+            db = getattr(self._appointment_repo, "_db", None)
+            if db is None:
+                return
+            with db.write_connection() as conn:
+                conn.execute(
+                    "UPDATE appointments SET status = 'completed' WHERE id = ?",
+                    (appointment_id,)
+                )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Could not mark appointment #%s as completed: %s", appointment_id, exc
+            )
+
+    # cancel_by_id уже определён выше (строка 225)

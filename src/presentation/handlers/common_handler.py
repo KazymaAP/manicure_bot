@@ -1,5 +1,9 @@
-# src/presentation/handlers/common_handler.py
-"""Общие обработчики: /start, /help, проверка подписки."""
+"""
+src/presentation/handlers/common_handler.py — Общие обработчики.
+
+Обновлено: тёплое приветствие с именем мастера, цены-карточки,
+контактная информация, кнопка «Связаться с мастером».
+"""
 
 import logging
 
@@ -11,15 +15,13 @@ from aiogram.types import Message, CallbackQuery
 from src.config.dependencies import Container
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
+from src.presentation.keyboards.booking import BookingKeyboard
 
 logger = logging.getLogger(__name__)
 
 
 def _get_portfolio(settings) -> str | None:
-    """Возвращает URL портфолио или None если не задан.
-    
-    FIXED: убрана избыточная операция `or None`.
-    """
+    """Возвращает URL портфолио или None если не задан."""
     return settings.portfolio_url
 
 
@@ -32,139 +34,37 @@ def setup_common_router(container: Container) -> Router:
     settings = container.settings
 
     async def _check_subscription(user_id: int, bot) -> bool:
-        """Проверяет подписку пользователя на канал (если задан).
-
-        Теперь:
-        - администраторы (из настроек) обходят проверку подписки;
-        - при ошибке проверки (исключение от Telegram API) проверка НЕ блокирует пользователя
-          — возвращается True, чтобы исключить ложные блокировки, когда бот не может связаться с API.
-        """
+        """Проверяет подписку пользователя на канал."""
         if not settings.required_channel:
             return True
-
-        # Админы всегда могут пользоваться ботом
         try:
             if user_id in settings.admin_ids:
                 return True
         except Exception:
-            # В редком случае, если settings.admin_ids некорректны — продолжаем обычную проверку
             pass
-
         try:
             member = await bot.get_chat_member(settings.required_channel, user_id)
             status = getattr(member, "status", None)
-            # Явные статусы, при которых пользование запрещено
             if status in ("left", "kicked", "banned"):
                 return False
-            # Если у объекта есть флаг is_member — используем его (новые версии aiogram)
             is_member_flag = getattr(member, "is_member", None)
             if is_member_flag is not None:
                 return bool(is_member_flag)
-            # По умолчанию считаем, что пользователь подписан
             return True
         except Exception as exc:
-            # Расширенное логирование для отладки: попробуем получить информацию о чате и залогировать исключение
-            try:
-                chat = await bot.get_chat(settings.required_channel)
-                logger.debug(
-                    "Chat info: chat=%s id=%s title=%s type=%s",
-                    settings.required_channel,
-                    getattr(chat, "id", None),
-                    getattr(chat, "title", None),
-                    getattr(chat, "type", None),
-                )
-            except Exception as chat_exc:
-                logger.debug("Не удалось получить chat info: %s", chat_exc)
-
-            try:
-                import aiogram.exceptions as _aiogram_exceptions
-                telegram_bad_request = getattr(_aiogram_exceptions, "TelegramBadRequest", None)
-            except Exception:
-                telegram_bad_request = None
-
-            msg = str(exc).lower()
-            # Полный трейс ошибки — полезно для дебага
-            logger.exception("Ошибка при вызове get_chat_member: %s", msg)
-
-            if telegram_bad_request is not None and isinstance(exc, telegram_bad_request):
-                logger.info(
-                    "TelegramBadRequest при проверке подписки для пользователя %s: %s",
-                    user_id, msg
-                )
-                # Тексты, которые однозначно означают отсутствие подписки
-                missing_indicators = (
-                    "user not found",
-                    "member not found",
-                    "not a member",
-                    "user not participant",
-                    "user is not a participant",
-                    "participant",
-                )
-
-                # Если видим, что участник не найден — попробуем ещё раз, получив сначала chat.id
-                if any(substr in msg for substr in missing_indicators):
-                    logger.debug("Попытка повторной проверки через get_chat -> get_chat_member для %s", settings.required_channel)
-                    try:
-                        chat = await bot.get_chat(settings.required_channel)
-                        chat_id = getattr(chat, "id", None)
-                        logger.debug("Получен chat.id=%s title=%s", chat_id, getattr(chat, "title", None))
-                        if chat_id is not None:
-                            try:
-                                member2 = await bot.get_chat_member(chat_id, user_id)
-                                status2 = getattr(member2, "status", None)
-                                logger.debug("Повторная проверка статуса участника: %s", status2)
-                                if status2 in ("left", "kicked", "banned"):
-                                    return False
-                                is_member_flag2 = getattr(member2, "is_member", None)
-                                if is_member_flag2 is not None:
-                                    return bool(is_member_flag2)
-                                return True
-                            except Exception as exc2:
-                                logger.debug("Повторная проверка get_chat_member не удалась: %s", exc2)
-                                # Не блокируем при повторной ошибке — считаем временной проблемой
-                                logger.warning(
-                                    "Повторная проверка подписки не удалась для пользователя %s в канале %s: %s. Не блокируем доступ.",
-                                    user_id, settings.required_channel, exc2
-                                )
-                                return True
-                    except Exception as chat_exc:
-                        logger.debug("Не удалось получить chat при повторной проверке: %s", chat_exc)
-                        # Если не можем получить chat — считаем временной ошибкой и не блокируем
-                        return True
-
-                # Явное указание на недоступность списка участников — логируем подсказку и считаем временной проблемой
-                if "member list is inaccessible" in msg or "have no rights" in msg or "have no rights to do that" in msg:
-                    logger.warning(
-                        "Проверка подписки вернула TelegramBadRequest (%s). Проверьте, что бот является администратором канала %s и имеет доступ к списку участников.",
-                        msg, settings.required_channel
-                    )
-                    # Не блокируем в этом случае, т.к. бот не может проверить
-                    return True
-
-                # Другие тексты ошибок трактуем как отсутствие подписки
-                logger.warning(
-                    "Проверка подписки вернула TelegramBadRequest (%s). Требуется проверка подписки для пользователя %s на канале %s.",
-                    msg, user_id, settings.required_channel
-                )
-                return False
-
-            logger.warning(
-                "Ошибка проверки подписки для пользователя %s на канал %s: %s",
-                user_id, settings.required_channel, exc
-            )
-            # Не блокировать пользователя при прочих временных ошибках связи с API
+            logger.warning("Ошибка проверки подписки для %s: %s", user_id, exc)
             return True
 
+    # ── /start — приветственное сообщение ────────────────────────────────
     @router.message(CommandStart())
     async def cmd_start(message: Message) -> None:
-        """FIXED: фича #17 — персональное приветствие с именем клиента."""
+        """Тёплое приветствие с именем клиента и красивым главным меню."""
         import asyncio
 
         user_id = message.from_user.id
         is_subscribed = await _check_subscription(user_id, message.bot)
 
         if not is_subscribed:
-            # FIXED: предлагаем пользователю кнопку подписки с ссылкой на канал
             await message.answer(
                 MessageFormatter.error_subscription_required(settings.required_channel),
                 reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
@@ -175,7 +75,7 @@ def setup_common_router(container: Container) -> Router:
         is_admin = user_id in settings.admin_ids
         portfolio = _get_portfolio(settings)
 
-        # FIXED: пытаемся получить последнюю запись для персонального приветствия
+        # Пытаемся получить имя из предыдущей записи (персонализация)
         appt_service = container.appointment_service
         greeting_name = None
         try:
@@ -185,43 +85,53 @@ def setup_common_router(container: Container) -> Router:
         except Exception:
             pass
 
-        # FIXED: используем баннерное приветствие с разделителями и кнопкой; отправляем фото если задано в settings
-        welcome_text = MessageFormatter.welcome_banner(greeting_name or message.from_user.first_name or message.from_user.username)
-        if getattr(settings, 'welcome_photo_url', None):
-            # FIXED: отправка фото с подписью-баннером
-            await message.answer_photo(
-                photo=settings.welcome_photo_url,
-                caption=welcome_text,
-                reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
-                parse_mode="HTML",
-            )
-        else:
-            await message.answer(
-                welcome_text,
-                reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
-                parse_mode="HTML",
-            )
+        # Используем имя из Telegram если нет из записи
+        display_name = greeting_name or message.from_user.first_name or message.from_user.username or "дорогой гость"
 
+        welcome_text = MessageFormatter.welcome_banner(display_name)
+
+        # Отправляем фото приветствия, если оно задано в настройках
+        if getattr(settings, 'welcome_photo_url', None):
+            try:
+                await message.answer_photo(
+                    photo=settings.welcome_photo_url,
+                    caption=welcome_text,
+                    reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
+                    parse_mode="HTML",
+                )
+                return
+            except Exception as e:
+                logger.warning("Не удалось отправить фото приветствия: %s", e)
+
+        await message.answer(
+            welcome_text,
+            reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
+            parse_mode="HTML",
+        )
+
+    # ── Проверка подписки ─────────────────────────────────────────────────
     @router.callback_query(F.data == "check_subscription")
     async def check_subscription_cb(callback: CallbackQuery) -> None:
-        """Обработчик кнопки 'Я подписался' — перепроверяет подписку и открывает бота."""
+        """Обработчик кнопки 'Я подписалась' — перепроверяет подписку."""
         user_id = callback.from_user.id
         is_subscribed = await _check_subscription(user_id, callback.bot)
         if is_subscribed:
             is_admin = user_id in settings.admin_ids
             portfolio = _get_portfolio(settings)
+            display_name = callback.from_user.first_name or callback.from_user.username or "дорогой гость"
             await callback.message.edit_text(
-                MessageFormatter.welcome(callback.from_user.username),
+                MessageFormatter.welcome_banner(display_name),
                 reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
                 parse_mode="HTML",
             )
-            await callback.answer("Проверка пройдена — добро пожаловать!")
+            await callback.answer("Проверка пройдена — добро пожаловать! 🌸")
         else:
-            # Предложим снова подписаться
-            await callback.answer("Вы всё ещё не подписаны. Нажмите кнопку '📢 Подписаться' и затем '✅ Я подписался'", show_alert=True)
-            await callback.message.edit_reply_markup(reply_markup=MainMenuKeyboard.subscribe(settings.required_channel))
+            await callback.answer(
+                "Вы ещё не подписались. Нажмите '📢 Подписаться' и затем '✅ Я подписалась'",
+                show_alert=True
+            )
 
-
+    # ── /help ──────────────────────────────────────────────────────────────
     @router.message(Command("help"))
     async def cmd_help(message: Message) -> None:
         await message.answer(
@@ -229,9 +139,10 @@ def setup_common_router(container: Container) -> Router:
             parse_mode="HTML",
         )
 
+    # ── /cancel — сброс FSM ────────────────────────────────────────────────
     @router.message(Command("cancel"))
     async def cmd_cancel(message: Message, state: FSMContext) -> None:
-        """FIXED: /cancel — сброс FSM состояния. Предотвращает 'зависание' пользователя."""
+        """Сброс текущего FSM-состояния."""
         current_state = await state.get_state()
         if current_state is None:
             await message.answer("Нет активного действия для отмены.")
@@ -240,17 +151,99 @@ def setup_common_router(container: Container) -> Router:
         is_admin = message.from_user.id in settings.admin_ids
         portfolio = _get_portfolio(settings)
         await message.answer(
-            "❌ Действие отменено. Возвращаемся в главное меню.",
+            "Действие отменено. Возвращаемся в главное меню 🌸",
             reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
         )
 
+    # ── Главное меню (кнопка) ─────────────────────────────────────────────
     @router.message(F.text == "🏠 Главное меню")
-    async def main_menu_button(message: Message) -> None:
+    async def main_menu_button(message: Message, state: FSMContext) -> None:
+        await state.clear()
         is_admin = message.from_user.id in settings.admin_ids
         portfolio = _get_portfolio(settings)
         await message.answer(
             MessageFormatter.main_menu_title(),
             reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
         )
+
+    # ── Цены ──────────────────────────────────────────────────────────────
+    @router.message(F.text.in_({"💰 Цены", "💰 Прайс"}))
+    async def prices_handler(message: Message) -> None:
+        """Показывает прайс-лист на услуги."""
+        services = settings.services or {}
+        text = MessageFormatter.prices_list(services)
+        await message.answer(text, parse_mode="HTML")
+
+    # ── Связаться с мастером ──────────────────────────────────────────────
+    @router.message(F.text.in_({"📞 Связаться с мастером", "📞 Контакты"}))
+    async def contacts_handler(message: Message) -> None:
+        """Показывает контактную информацию мастера."""
+        # Получаем username первого admin_id как контакт мастера
+        master_username = None
+        if settings.admin_ids:
+            try:
+                chat = await message.bot.get_chat(settings.admin_ids[0])
+                master_username = getattr(chat, 'username', None)
+            except Exception:
+                pass
+
+        text = MessageFormatter.contacts_text(
+            phone=getattr(settings, 'phone', None),
+            instagram=getattr(settings, 'instagram', None),
+            address=getattr(settings, 'address', None),
+            maps_link=getattr(settings, 'maps_link', None),
+            master_username=master_username,
+        )
+
+        # Кнопка "Написать мастеру" если есть username
+        if master_username:
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="✉️ Написать мастеру",
+                    url=f"https://t.me/{master_username}"
+                )]
+            ])
+            await message.answer(text, parse_mode="HTML", reply_markup=kb)
+        else:
+            await message.answer(text, parse_mode="HTML")
+
+    # ── Callback: книга записаться снова ──────────────────────────────────
+    @router.callback_query(F.data == "book_again_start")
+    async def book_again_start(callback: CallbackQuery, state: FSMContext) -> None:
+        """Запускает процесс новой записи из кнопки 'Записаться снова'."""
+        await state.clear()
+        # Редиректим на начало записи
+        from src.domain.enums.fsm_states import BookingFSM
+        await state.set_state(BookingFSM.choosing_service)
+        await callback.message.answer(
+            MessageFormatter.choose_service(),
+            reply_markup=__import__(
+                'src.presentation.keyboards.booking', fromlist=['BookingKeyboard']
+            ).BookingKeyboard.service_selection(settings.services or None),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    # ── Inline callback: возврат в главное меню ───────────────────────────
+    @router.callback_query(F.data == "main_menu")
+    async def inline_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
+        """Возврат в главное меню из inline-кнопки."""
+        await state.clear()
+        is_admin = callback.from_user.id in settings.admin_ids
+        portfolio = _get_portfolio(settings)
+        try:
+            await callback.message.edit_text(
+                MessageFormatter.main_menu_title(),
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+        await callback.message.answer(
+            MessageFormatter.main_menu_title(),
+            reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
+            parse_mode="HTML",
+        )
+        await callback.answer()
 
     return router

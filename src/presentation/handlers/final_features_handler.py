@@ -125,29 +125,11 @@ def setup_final_features_router(container: Container) -> Router:
             logger.exception("Schedule view error: %s", exc)
             await message.answer("❌ Ошибка при загрузке расписания")
 
-    # ── #20 /contacts — контактная информация ──────────────────────────────
-    @router.message(F.text == "📞 Контакты")
-    async def show_contacts(message: Message) -> None:
-        """FIXED: фича #20 — контактная информация мастера."""
-        phone = settings.phone or ""
-        instagram = settings.instagram or ""
-        address = settings.address or ""
-        maps_link = settings.maps_link or ""
+    # ── #20 Контакты — перенесены в common_handler ─────────────────────────
+    # Обработчик «📞 Связаться с мастером» и «📞 Контакты» находится в common_handler.py
 
-        text = MessageFormatter.contact_info(phone, instagram, address, maps_link)
-        await message.answer(text)
-
-    # ── #21 /prices — прайс-лист услуг ────────────────────────────────────
-    @router.message(F.text == "💰 Цены")
-    async def show_prices(message: Message) -> None:
-        """FIXED: фича #21 — прайс-лист из config.json."""
-        services = settings.services or {}
-        if not services:
-            await message.answer("ℹ️ Список услуг не настроен")
-            return
-
-        text = MessageFormatter.price_list(services)
-        await message.answer(text)
+    # ── #21 Цены — перенесены в common_handler ─────────────────────────────
+    # Обработчик «💰 Цены» находится в common_handler.py
 
     # ── #19 /share — поделиться ботом ────────────────────────────────────
     @router.message(F.text == "📤 Поделиться")
