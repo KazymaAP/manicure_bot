@@ -643,8 +643,18 @@ class MessageFormatter:
         return "⚠️ Некорректный формат даты. Введите в формате ГГГГ-ММ-ДД (например: 2025-06-15)"
 
     @staticmethod
-    def admin_stats(total: int, confirmed: int, cancelled: int, today: int, week: int) -> str:
-        return (
+    def admin_stats(
+        total: int,
+        confirmed: int,
+        cancelled: int,
+        today: int,
+        week: int,
+        revenue_today: int = 0,
+        revenue_week: int = 0,
+        revenue_month: int = 0,
+    ) -> str:
+        """FIXED BUG-15: добавлена выручка за сегодня, неделю, месяц."""
+        base = (
             "📊 <b>Статистика</b>\n"
             "━━━━━━━━━━━━━━━━━\n"
             f"📋 Всего записей: <b>{total}</b>\n"
@@ -653,6 +663,15 @@ class MessageFormatter:
             f"📅 Сегодня: <b>{today}</b>\n"
             f"📆 За неделю: <b>{week}</b>"
         )
+        if revenue_today or revenue_week or revenue_month:
+            base += (
+                "\n\n💰 <b>Выручка</b>\n"
+                "━━━━━━━━━━━━━━━━━\n"
+                f"📅 Сегодня: <b>{revenue_today:,} ₽</b>\n"
+                f"📆 За неделю: <b>{revenue_week:,} ₽</b>\n"
+                f"📆 За месяц: <b>{revenue_month:,} ₽</b>"
+            )
+        return base
 
     @staticmethod
     def operation_cancelled() -> str:

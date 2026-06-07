@@ -330,12 +330,11 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 data.get("service"),
             )
 
-            # Если это перенос — отменяем старую запись
-            if data.get("transfer_source_appt_id"):
-                try:
-                    await asyncio.to_thread(appt_service.cancel_by_id, data.get("transfer_source_appt_id"))
-                except Exception:
-                    logger.exception("Не удалось отменить старую запись при переносе")
+            # FIXED BUG-10: логика переноса записи удалена из этого места.
+            # Перенос полностью обрабатывается в extended_features_handler.py
+            # (transfer_confirm_new_slot), где реализован корректный атомарный подход
+            # с восстановлением старой записи в случае ошибки.
+            # Запись через confirm_booking используется только для новых записей.
 
             # Уведомляем администратора
             await notif_service.notify_admin_new_booking(appointment_id)
@@ -493,6 +492,65 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         finally:
             if not answered:
                 await callback.answer()
+
+    # ── FIXED BUG-1: Хендлер waitlist_book (бронирование из листа ожидания) ─
+    @router.callback_query(F.data.startswith("waitlist_book:"))
+    async def waitlist_book(callback: CallbackQuery, state: FSMContext) -> None:
+        """FIXED BUG-1: обрабатывает кнопку 'Записаться!' из уведомления листа ожидания.
+
+        Парсит дату и время из callback_data, проверяет что слот ещё свободен,
+        и запускает процесс бронирования.
+        """
+        import asyncio
+        # Формат: waitlist_book:{date}:{time_with_dashes}
+        parts = callback.data.split(":", 2)
+        if len(parts) < 3:
+            await callback.answer("❌ Некорректные данные", show_alert=True)
+            return
+
+        date_str = parts[1]
+        time_str = parts[2].replace("-", ":")  # восстанавливаем HH:MM из HH-MM
+
+        # Проверяем что слот ещё свободен
+        slots = await sched_service.get_available_slots(date_str)
+        available_times = [s.time for s in slots]
+        if time_str not in available_times:
+            await callback.answer(
+                f"😔 К сожалению, слот {date_str} {time_str} уже занят.\n"
+                "Выберите другое время.",
+                show_alert=True,
+            )
+            return
+
+        # Получаем данные предыдущей записи для автозаполнения
+        prev_appts = await asyncio.to_thread(appt_service.get_user_appointments, callback.from_user.id)
+        if prev_appts:
+            last = prev_appts[-1]
+            await state.update_data(
+                client_name=last.client_name,
+                phone=last.phone,
+                chosen_date=date_str,
+                chosen_time=time_str,
+            )
+        else:
+            await state.update_data(chosen_date=date_str, chosen_time=time_str)
+
+        await state.set_state(BookingFSM.choosing_service)
+        await callback.message.answer(
+            f"✅ Отлично! Слот <b>{date_str} в {time_str}</b> свободен.\n\n"
+            "Выберите услугу для записи:",
+            reply_markup=BookingKeyboard.service_selection(settings.services or None),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "waitlist_decline")
+    async def waitlist_decline(callback: CallbackQuery) -> None:
+        """Пользователь отказался от места в листе ожидания."""
+        await callback.message.edit_text(
+            "Понятно! Если понадобится — заходи снова 🌸"
+        )
+        await callback.answer()
 
     # ── Возврат к выбору даты из выбора времени ────────────────────────────
     @router.callback_query(BookingFSM.choosing_time, F.data == "book_start")

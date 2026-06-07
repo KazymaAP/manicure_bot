@@ -2,10 +2,13 @@
 src/application/services/notification_service.py — Сервис уведомлений.
 
 ✅ Из v2_tar: все методы уведомлений + _safe_send
-✅ Улучшения v4: notify_admin_cancellation принимает appointment объект напрямую
+✅ FIXED BUG-6: notify_admin_cancellation принимает appointment_id (int) — единая сигнатура.
+   Все вызовы в коде используют ID, объект загружается внутри метода.
 ✅ FIXED BUG-05: _safe_send использует isinstance(TelegramForbiddenError) вместо хрупкой
    проверки по имени класса через строку. Пользователи с Forbidden-ошибкой помечаются
    как неактивные для исключения из будущих рассылок.
+✅ FIXED BUG-4: is_bot_blocked сохраняется в БД (таблица users) через _appointment_repo.
+   При Forbidden-ошибке флаг записывается в БД. При отправке проверяется БД.
 """
 from __future__ import annotations
 
@@ -55,17 +58,61 @@ class NotificationService:
         # FIXED M-06: _address теперь корректно устанавливается из параметра конструктора,
         # а не через getattr с пустым fallback. Адрес теперь отображается в напоминаниях.
         self._address: str = address or ""
-        # FIXED H-03: убрано дублирование объявления _blocked_users (было объявлено дважды —
-        # до и после docstring). Оставляем одно объявление.
-        # FIXED BUG-05: множество user_id, заблокировавших бота — исключаем из рассылок
+        # FIXED BUG-05: множество user_id, заблокировавших бота — исключаем из рассылок.
+        # FIXED BUG-4: кэш в памяти + персистентность в БД через _mark_blocked_in_db()
         self._blocked_users: set[int] = set()
 
-    async def notify_admin_new_booking(self, appointment_id: int) -> None:
-        """Уведомляет администратора о новой записи.
+    def _is_blocked_in_db(self, user_id: int) -> bool:
+        """FIXED BUG-4: проверяет флаг is_bot_blocked в БД users."""
+        try:
+            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
+            if db is None:
+                return False
+            with db.read_connection() as conn:
+                row = conn.execute(
+                    "SELECT is_bot_blocked FROM users WHERE user_id = ?", (user_id,)
+                ).fetchone()
+                if row is not None:
+                    return bool(row[0])
+        except Exception as exc:
+            logger.debug("Cannot check is_bot_blocked for %s: %s", user_id, exc)
+        return False
 
-        Args:
-            appointment_id: ID созданной записи.
+    def _mark_blocked_in_db(self, user_id: int) -> None:
+        """FIXED BUG-4: записывает is_bot_blocked=1 в таблицу users."""
+        try:
+            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
+            if db is None:
+                return
+            with db.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO users (user_id, is_bot_blocked) VALUES (?, 1) "
+                    "ON CONFLICT(user_id) DO UPDATE SET is_bot_blocked = 1",
+                    (user_id,)
+                )
+        except Exception as exc:
+            logger.warning("Cannot mark user %s as blocked in DB: %s", user_id, exc)
+
+    def load_blocked_from_db(self) -> None:
+        """FIXED BUG-4: загружает список заблокировавших пользователей из БД в кэш памяти.
+
+        Вызывать при старте бота для восстановления кэша после перезапуска.
         """
+        try:
+            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
+            if db is None:
+                return
+            with db.read_connection() as conn:
+                rows = conn.execute(
+                    "SELECT user_id FROM users WHERE is_bot_blocked = 1"
+                ).fetchall()
+                for row in rows:
+                    self._blocked_users.add(row[0])
+            logger.info("Loaded %d blocked users from DB", len(self._blocked_users))
+        except Exception as exc:
+            logger.warning("Cannot load blocked users from DB: %s", exc)
+
+    async def notify_admin_new_booking(self, appointment_id: int) -> None:
         appt = await asyncio.to_thread(self._appointment_repo.get_by_id, appointment_id)
         if not appt:
             logger.warning("Cannot notify admin: appointment #%s not found", appointment_id)
@@ -258,8 +305,14 @@ class NotificationService:
             True если сообщение отправлено.
         """
         # FIXED BUG-05: проверяем, не заблокировал ли пользователь бота ранее
+        # FIXED BUG-4: проверяем и кэш памяти, и БД (для персистентности)
         if chat_id in self._blocked_users:
-            logger.debug("Skipping send to blocked user %s", chat_id)
+            logger.debug("Skipping send to blocked user %s (memory cache)", chat_id)
+            return False
+        # Если в памяти нет — проверяем БД (на случай перезапуска)
+        if self._is_blocked_in_db(chat_id):
+            self._blocked_users.add(chat_id)  # добавляем в кэш
+            logger.debug("Skipping send to blocked user %s (DB)", chat_id)
             return False
 
         max_retries = 3
@@ -291,8 +344,9 @@ class NotificationService:
                             "Adding to blocked list to prevent future sends.",
                             chat_id, exc,
                         )
-                        # FIXED BUG-05: помечаем как заблокированного — исключаем из будущих рассылок
+                        # FIXED BUG-05/BUG-4: помечаем как заблокированного — кэш + БД
                         self._blocked_users.add(chat_id)
+                        self._mark_blocked_in_db(chat_id)  # FIXED BUG-4: персистентность
                         return False
                 except ImportError:
                     # Fallback если структура aiogram.exceptions изменилась
@@ -310,6 +364,7 @@ class NotificationService:
                             chat_id, exc,
                         )
                         self._blocked_users.add(chat_id)
+                        self._mark_blocked_in_db(chat_id)  # FIXED BUG-4: персистентность
                         return False
                 logger.error("Failed to send message to chat_id=%s: %s", chat_id, exc)
                 return False

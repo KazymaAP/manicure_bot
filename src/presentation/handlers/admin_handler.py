@@ -316,7 +316,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
-        await state.set_state(AdminFSM.waiting_for_date)
+        # FIXED BUG-5: используем отдельное состояние waiting_for_slot_date
+        await state.set_state(AdminFSM.waiting_for_slot_date)
         await callback.message.answer(
             MessageFormatter.admin_enter_date(),
             reply_markup=AdminKeyboard.cancel(),
@@ -328,7 +329,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     async def admin_add_slot_start(message: Message, state: FSMContext) -> None:
         if not _is_admin(message.from_user.id):
             return
-        await state.set_state(AdminFSM.waiting_for_date)
+        # FIXED BUG-5: используем отдельное состояние waiting_for_slot_date
+        await state.set_state(AdminFSM.waiting_for_slot_date)
         await message.answer(
             MessageFormatter.admin_enter_date(),
             reply_markup=AdminKeyboard.cancel(),
@@ -350,6 +352,58 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await callback.answer()
 
+    # FIXED BUG-5: отдельный хендлер для waiting_for_slot_date (добавление слота)
+    @router.message(AdminFSM.waiting_for_slot_date, F.text)
+    async def admin_add_slot_date_new(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not re.match(r"^\d{4}[-.]\d{2}[-.]\d{2}$", text) and not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+            await message.answer(MessageFormatter.admin_invalid_date_format())
+            return
+        date_str = text.replace('.', '-')
+        try:
+            await asyncio.to_thread(sched_service.ensure_working_day_exists, date_str)
+        except Exception as exc:
+            logger.warning("Не удалось создать рабочий день %s: %s", date_str, exc)
+        await state.update_data(slot_date=date_str)
+        await state.set_state(AdminFSM.waiting_for_time)
+        await message.answer(
+            MessageFormatter.admin_enter_slot_time(),
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+
+    # FIXED BUG-5: отдельный хендлер для waiting_for_toggle_date (открытие/закрытие дня)
+    @router.message(AdminFSM.waiting_for_toggle_date, F.text)
+    async def admin_toggle_day_date(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not re.match(r"^\d{4}[-.]\d{2}[-.]\d{2}$", text) and not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+            await message.answer(MessageFormatter.admin_invalid_date_format())
+            return
+        date_str = text.replace('.', '-')
+        data = await state.get_data()
+        is_opening = bool(data.get("is_opening", True))
+        try:
+            if is_opening:
+                await asyncio.to_thread(sched_service.open_day, date_str)
+                await message.answer(MessageFormatter.admin_day_opened(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
+            else:
+                await asyncio.to_thread(sched_service.close_day, date_str)
+                await message.answer(MessageFormatter.admin_day_closed(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
+        except Exception as exc:
+            logger.error("Ошибка при открытии/закрытии дня %s: %s", date_str, exc)
+            await message.answer(MessageFormatter.error_general())
+        finally:
+            await state.clear()
+
+    # Оставляем waiting_for_date для обратной совместимости (используется в extended_features)
     @router.message(AdminFSM.waiting_for_date, F.text)
     async def admin_add_slot_date(message: Message, state: FSMContext) -> None:
         if message.text.strip() == "❌ Отмена":
@@ -471,7 +525,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         is_opening = message.text == "🗓 Открыть день"
         await state.update_data(is_opening=is_opening)
-        await state.set_state(AdminFSM.waiting_for_date)
+        # FIXED BUG-5: используем отдельное состояние waiting_for_toggle_date
+        await state.set_state(AdminFSM.waiting_for_toggle_date)
         await message.answer(
             MessageFormatter.admin_enter_date(),
             reply_markup=AdminKeyboard.cancel(),
@@ -484,7 +539,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer()
             return
         await state.update_data(is_opening=True)
-        await state.set_state(AdminFSM.waiting_for_date)
+        # FIXED BUG-5: используем отдельное состояние waiting_for_toggle_date
+        await state.set_state(AdminFSM.waiting_for_toggle_date)
         await callback.message.answer(
             MessageFormatter.admin_enter_date(),
             reply_markup=AdminKeyboard.cancel(),
@@ -498,7 +554,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer()
             return
         await state.update_data(is_opening=False)
-        await state.set_state(AdminFSM.waiting_for_date)
+        # FIXED BUG-5: используем отдельное состояние waiting_for_toggle_date
+        await state.set_state(AdminFSM.waiting_for_toggle_date)
         await callback.message.answer(
             MessageFormatter.admin_enter_date(),
             reply_markup=AdminKeyboard.cancel(),
@@ -612,15 +669,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await state.clear()
 
         try:
-            appointments = await asyncio.to_thread(appt_service.get_appointments_filtered, "all")
-            # Ищем по имени или телефону
-            query_lower = query.lower()
-            found = [
-                a for a in appointments
-                if query_lower in (a.client_name or "").lower()
-                or query in (a.phone or "")
-                or query_lower in (getattr(a, 'username', '') or "").lower()
-            ]
+            # FIXED BUG-11: используем SQL LIKE через search_appointments_by_client
+            # вместо загрузки всех записей в память
+            found = await asyncio.to_thread(appt_service.search_appointments_by_client, query)
 
             if not found:
                 await message.answer(f"😔 Клиент по запросу «{query}» не найден.")
@@ -800,6 +851,499 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             parse_mode="HTML",
         )
         await callback.answer()
+
+        await callback.answer()
+
+    # ════════════════════════════════════════════════════════════════════
+    # FIXED BUG-3: ПОЛНЫЕ ХЕНДЛЕРЫ ДЛЯ НАСТРОЕК ЧЕРЕЗ БОТ
+    # ════════════════════════════════════════════════════════════════════
+
+    # ── Хелпер для атомарного сохранения config.json ─────────────────────
+    async def _save_config(config: dict) -> None:
+        """Атомарно сохраняет config.json и инвалидирует кэш."""
+        import tempfile
+        config_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
+        )
+        async with _config_write_lock:
+            config_dir = os.path.dirname(config_path)
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8",
+                    dir=config_dir, suffix=".tmp", delete=False,
+                ) as tmp_f:
+                    tmp_path = tmp_f.name
+                    json.dump(config, tmp_f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, config_path)
+                tmp_path = None
+                try:
+                    from src.config.dependencies import _load_config_json
+                    _load_config_json.cache_clear()
+                except Exception:
+                    pass
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    with contextlib.suppress(Exception):
+                        os.unlink(tmp_path)
+
+    def _load_config() -> dict:
+        """Загружает config.json."""
+        config_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
+        )
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    # ── Редактирование рабочих часов (FIXED BUG-3) ────────────────────────
+    @router.callback_query(F.data == "admin_edit_hours")
+    async def admin_edit_hours(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        current_slots = settings.default_time_slots or []
+        current_text = ", ".join(current_slots) if current_slots else "не задано"
+        await state.set_state(AdminFSM.waiting_for_edit_hours)
+        await callback.message.answer(
+            f"🕐 <b>Редактирование рабочих часов</b>\n\n"
+            f"Текущие слоты: <code>{current_text}</code>\n\n"
+            f"Введите слоты через запятую в формате ЧЧ:ММ\n"
+            f"Пример: <code>09:00, 10:00, 11:00, 14:00, 15:00</code>",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    @router.message(AdminFSM.waiting_for_edit_hours, F.text)
+    async def admin_edit_hours_save(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        # Парсим слоты
+        raw_slots = [s.strip() for s in text.split(",") if s.strip()]
+        valid_slots = []
+        for slot in raw_slots:
+            if not re.match(r"^\d{2}:\d{2}$", slot):
+                await message.answer(f"❌ Некорректный формат: <code>{slot}</code>. Используйте ЧЧ:ММ", parse_mode="HTML")
+                return
+            h, m = map(int, slot.split(":"))
+            if not (0 <= h < 24 and 0 <= m < 60):
+                await message.answer(f"❌ Время вне диапазона: <code>{slot}</code>", parse_mode="HTML")
+                return
+            valid_slots.append(slot)
+        if not valid_slots:
+            await message.answer("❌ Введите хотя бы один слот.")
+            return
+        try:
+            config = await asyncio.to_thread(_load_config)
+            if "schedule" not in config:
+                config["schedule"] = {}
+            config["schedule"]["default_time_slots"] = valid_slots
+            await _save_config(config)
+            # Обновляем настройки в памяти
+            settings.default_time_slots.clear()
+            settings.default_time_slots.extend(valid_slots)
+        except Exception as exc:
+            logger.error("Ошибка сохранения рабочих часов: %s", exc)
+            await message.answer(MessageFormatter.error_general())
+            await state.clear()
+            return
+        await state.clear()
+        await message.answer(
+            f"✅ Рабочие часы обновлены!\n\n"
+            f"Слотов: <b>{len(valid_slots)}</b>: {', '.join(valid_slots)}\n\n"
+            "<i>Изменения применены. Перезапуск не требуется.</i>",
+            reply_markup=AdminKeyboard.main_menu(),
+            parse_mode="HTML",
+        )
+
+    # ── Редактирование интервала между записями (FIXED BUG-3) ─────────────
+    @router.callback_query(F.data == "admin_edit_interval")
+    async def admin_edit_interval(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        await state.set_state(AdminFSM.waiting_for_edit_interval)
+        await callback.message.answer(
+            "⏱ <b>Интервал между записями</b>\n\n"
+            "Введите интервал в минутах (например: <code>60</code>):\n"
+            "<i>Это значение используется при генерации слотов расписания</i>",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    @router.message(AdminFSM.waiting_for_edit_interval, F.text)
+    async def admin_edit_interval_save(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not text.isdigit() or int(text) < 15 or int(text) > 480:
+            await message.answer("❌ Введите число от 15 до 480 минут.")
+            return
+        interval = int(text)
+        try:
+            config = await asyncio.to_thread(_load_config)
+            if "schedule" not in config:
+                config["schedule"] = {}
+            config["schedule"]["slot_interval_minutes"] = interval
+            await _save_config(config)
+        except Exception as exc:
+            logger.error("Ошибка сохранения интервала: %s", exc)
+            await message.answer(MessageFormatter.error_general())
+            await state.clear()
+            return
+        await state.clear()
+        await message.answer(
+            f"✅ Интервал обновлён: <b>{interval} мин</b>\n\n"
+            "<i>Изменения сохранены в config.json</i>",
+            reply_markup=AdminKeyboard.main_menu(),
+            parse_mode="HTML",
+        )
+
+    # ── Редактирование времени напоминания (FIXED BUG-3) ──────────────────
+    @router.callback_query(F.data == "admin_edit_reminder")
+    async def admin_edit_reminder(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        current = settings.reminder_hours_before
+        await state.set_state(AdminFSM.waiting_for_edit_reminder)
+        await callback.message.answer(
+            f"🔔 <b>Время напоминания</b>\n\n"
+            f"Текущее значение: <b>{current} часов до записи</b>\n\n"
+            "Введите за сколько часов отправлять напоминание (1–72):",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    @router.message(AdminFSM.waiting_for_edit_reminder, F.text)
+    async def admin_edit_reminder_save(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not text.isdigit() or int(text) < 1 or int(text) > 72:
+            await message.answer("❌ Введите число от 1 до 72.")
+            return
+        hours = int(text)
+        try:
+            config = await asyncio.to_thread(_load_config)
+            if "bot" not in config:
+                config["bot"] = {}
+            config["bot"]["reminder_hours_before"] = hours
+            await _save_config(config)
+            # Обновляем в памяти без перезапуска
+            settings.__dict__["reminder_hours_before"] = hours
+        except Exception as exc:
+            logger.error("Ошибка сохранения напоминания: %s", exc)
+            await message.answer(MessageFormatter.error_general())
+            await state.clear()
+            return
+        await state.clear()
+        await message.answer(
+            f"✅ Время напоминания: за <b>{hours} ч</b> до записи\n\n"
+            "<i>Применено немедленно.</i>",
+            reply_markup=AdminKeyboard.main_menu(),
+            parse_mode="HTML",
+        )
+
+    # ── Добавить услугу (FIXED BUG-3, BUG-16) ────────────────────────────
+    @router.callback_query(F.data == "admin_add_service")
+    async def admin_add_service_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        await state.set_state(AdminFSM.waiting_for_service_name)
+        await state.update_data(service_action="add")
+        await callback.message.answer(
+            "➕ <b>Добавить услугу</b>\n\n"
+            "Введите <b>название</b> новой услуги:\n"
+            "<i>Например: Маникюр гель-лак</i>",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    # ── Изменить услугу (FIXED BUG-3, BUG-16) ────────────────────────────
+    @router.callback_query(F.data == "admin_edit_service")
+    async def admin_edit_service_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        services = settings.services or {}
+        if not services:
+            await callback.answer("❌ Услуги не настроены", show_alert=True)
+            return
+        # Показываем список услуг для выбора
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        buttons = []
+        for svc_name in services.keys():
+            buttons.append([InlineKeyboardButton(
+                text=f"✏️ {svc_name}",
+                callback_data=f"admin_edit_svc_select:{svc_name}"
+            )])
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_settings")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await callback.message.edit_text(
+            "✏️ <b>Выберите услугу для редактирования:</b>",
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin_edit_svc_select:"))
+    async def admin_edit_svc_select(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        svc_name = callback.data.split(":", 1)[1]
+        await state.set_state(AdminFSM.waiting_for_service_name)
+        await state.update_data(service_action="edit", service_old_name=svc_name)
+        await callback.message.answer(
+            f"✏️ Редактирование: <b>{svc_name}</b>\n\n"
+            "Введите <b>новое название</b> (или то же самое если хотите изменить только цену/время):",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    # ── Удалить услугу (FIXED BUG-3, BUG-16) ─────────────────────────────
+    @router.callback_query(F.data == "admin_delete_service")
+    async def admin_delete_service_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        services = settings.services or {}
+        if not services:
+            await callback.answer("❌ Услуги не настроены", show_alert=True)
+            return
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        buttons = []
+        for svc_name in services.keys():
+            buttons.append([InlineKeyboardButton(
+                text=f"🗑 {svc_name}",
+                callback_data=f"admin_del_svc_confirm:{svc_name}"
+            )])
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_settings")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await callback.message.edit_text(
+            "🗑 <b>Выберите услугу для удаления:</b>",
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin_del_svc_confirm:"))
+    async def admin_delete_service_confirm(callback: CallbackQuery) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        svc_name = callback.data.split(":", 1)[1]
+        try:
+            config = await asyncio.to_thread(_load_config)
+            services_in_config = config.get("services", {})
+            if svc_name in services_in_config:
+                del services_in_config[svc_name]
+                config["services"] = services_in_config
+                await _save_config(config)
+            # Обновляем в памяти
+            if svc_name in settings.services:
+                del settings.services[svc_name]
+            await callback.message.edit_text(
+                f"✅ Услуга <b>{svc_name}</b> удалена.\n\n<i>Изменения сохранены.</i>",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        except Exception as exc:
+            logger.error("Ошибка удаления услуги %s: %s", svc_name, exc)
+            await callback.message.edit_text(MessageFormatter.error_general())
+        await callback.answer()
+
+    # ── FSM хендлеры для добавления/редактирования услуги ─────────────────
+    @router.message(AdminFSM.waiting_for_service_name, F.text)
+    async def admin_service_name_input(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        name = message.text.strip()
+        if not name or len(name) > 100:
+            await message.answer("❌ Название должно быть от 1 до 100 символов.")
+            return
+        await state.update_data(service_new_name=name)
+        await state.set_state(AdminFSM.waiting_for_service_price)
+        data = await state.get_data()
+        action = data.get("service_action", "add")
+        old_price = ""
+        if action == "edit":
+            old_name = data.get("service_old_name", name)
+            svc_info = (settings.services or {}).get(old_name, {})
+            old_price = f" (текущая: {svc_info.get('price', '?')} ₽)" if isinstance(svc_info, dict) else ""
+        await message.answer(
+            f"💰 Введите <b>цену</b>{old_price} в рублях (только число):\n"
+            "<i>Например: 1500</i>",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+
+    @router.message(AdminFSM.waiting_for_service_price, F.text)
+    async def admin_service_price_input(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not text.isdigit() or int(text) < 0:
+            await message.answer("❌ Введите положительное целое число (цена в рублях).")
+            return
+        await state.update_data(service_price=int(text))
+        await state.set_state(AdminFSM.waiting_for_service_duration)
+        data = await state.get_data()
+        action = data.get("service_action", "add")
+        old_dur = ""
+        if action == "edit":
+            old_name = data.get("service_old_name", "")
+            svc_info = (settings.services or {}).get(old_name, {})
+            old_dur = f" (текущая: {svc_info.get('duration', '?')} мин)" if isinstance(svc_info, dict) else ""
+        await message.answer(
+            f"⏱ Введите <b>длительность</b>{old_dur} в минутах:\n"
+            "<i>Например: 60</i>",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+
+    @router.message(AdminFSM.waiting_for_service_duration, F.text)
+    async def admin_service_duration_save(message: Message, state: FSMContext) -> None:
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not text.isdigit() or int(text) < 1:
+            await message.answer("❌ Введите положительное целое число (минуты).")
+            return
+        duration = int(text)
+        data = await state.get_data()
+        action = data.get("service_action", "add")
+        new_name = data.get("service_new_name", "")
+        old_name = data.get("service_old_name", new_name)
+        price = data.get("service_price", 0)
+
+        try:
+            config = await asyncio.to_thread(_load_config)
+            if "services" not in config:
+                config["services"] = {}
+            # Для редактирования — удаляем старое название, добавляем новое
+            if action == "edit" and old_name and old_name != new_name:
+                config["services"].pop(old_name, None)
+            config["services"][new_name] = {"price": price, "duration": duration}
+            await _save_config(config)
+            # Обновляем settings в памяти без перезапуска
+            if action == "edit" and old_name and old_name != new_name:
+                settings.services.pop(old_name, None)
+            settings.services[new_name] = {"price": price, "duration": duration}
+        except Exception as exc:
+            logger.error("Ошибка сохранения услуги: %s", exc)
+            await message.answer(MessageFormatter.error_general())
+            await state.clear()
+            return
+
+        # Показываем актуальный прайс после изменения
+        services = settings.services or {}
+        price_text = "💅 <b>Актуальные услуги:</b>\n\n"
+        for svc, info in services.items():
+            p = info.get("price", "—") if isinstance(info, dict) else "—"
+            d = info.get("duration", "—") if isinstance(info, dict) else "—"
+            price_text += f"• <b>{svc}</b>: {p} ₽, {d} мин\n"
+
+        action_text = "добавлена" if action == "add" else "обновлена"
+        await message.answer(
+            f"✅ Услуга «{new_name}» {action_text}!\n\n"
+            f"{price_text}\n"
+            "<i>Изменения применены немедленно.</i>",
+            reply_markup=AdminKeyboard.main_menu(),
+            parse_mode="HTML",
+        )
+        await state.clear()
+
+    # ── Написать клиенту (FIXED BUG-3) ────────────────────────────────────
+    @router.callback_query(F.data == "admin_message_client")
+    async def admin_message_client_start(callback: CallbackQuery, state: FSMContext) -> None:
+        """Начинает процесс отправки сообщения конкретному клиенту."""
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        await state.set_state(AdminFSM.waiting_for_message_user_id)
+        await callback.message.answer(
+            "✉️ <b>Написать клиенту</b>\n\n"
+            "Введите <b>Telegram ID</b> клиента\n"
+            "<i>(Его можно найти через «🔍 Найти клиента»)</i>:",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    @router.message(AdminFSM.waiting_for_message_user_id, F.text)
+    async def admin_message_client_get_id(message: Message, state: FSMContext) -> None:
+        """Получает Telegram ID клиента для отправки сообщения."""
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not text.isdigit():
+            await message.answer("❌ Введите числовой Telegram ID пользователя.")
+            return
+        target_user_id = int(text)
+        await state.update_data(message_target_user_id=target_user_id)
+        await state.set_state(AdminFSM.waiting_for_message_client)
+        await message.answer(
+            f"✍️ Введите текст сообщения для пользователя <b>{target_user_id}</b>:\n"
+            "<i>Поддерживается HTML-форматирование</i>",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+
+    @router.message(AdminFSM.waiting_for_message_client, F.text)
+    async def admin_message_client_send(message: Message, state: FSMContext) -> None:
+        """Отправляет сообщение клиенту от имени администратора."""
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        data = await state.get_data()
+        target_user_id = data.get("message_target_user_id")
+        if not target_user_id:
+            await state.clear()
+            await message.answer("❌ Ошибка: не найден ID получателя.", reply_markup=AdminKeyboard.main_menu())
+            return
+        try:
+            text_to_send = (
+                f"📩 <b>Сообщение от мастера:</b>\n\n"
+                f"{message.text}"
+            )
+            await message.bot.send_message(target_user_id, text_to_send, parse_mode="HTML")
+            await message.answer(
+                f"✅ Сообщение отправлено пользователю {target_user_id}.",
+                reply_markup=AdminKeyboard.main_menu(),
+            )
+        except Exception as exc:
+            logger.error("Ошибка отправки сообщения клиенту %s: %s", target_user_id, exc)
+            await message.answer(
+                f"❌ Не удалось отправить сообщение (пользователь {target_user_id} мог заблокировать бота).",
+                reply_markup=AdminKeyboard.main_menu(),
+            )
+        await state.clear()
 
     # ── Обработчик текста при редактировании настроек ─────────────────────
     @router.message(AdminFSM.waiting_for_broadcast, F.text)
@@ -1018,6 +1562,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         try:
             stats = await asyncio.to_thread(appt_service.get_statistics)
+            # FIXED BUG-15: вычисляем выручку на основе записей и цен из settings.services
+            revenue = await asyncio.to_thread(_calc_revenue)
             await message.answer(
                 MessageFormatter.admin_stats(
                     total=stats.get("total", 0),
@@ -1025,12 +1571,52 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                     cancelled=stats.get("cancelled", 0),
                     today=stats.get("today", 0),
                     week=stats.get("week", 0),
+                    revenue_today=revenue.get("today", 0),
+                    revenue_week=revenue.get("week", 0),
+                    revenue_month=revenue.get("month", 0),
                 ),
                 parse_mode="HTML",
             )
         except Exception as exc:
             logger.error("Ошибка получения статистики: %s", exc)
             await message.answer(MessageFormatter.error_general())
+
+    def _calc_revenue() -> dict:
+        """FIXED BUG-15: вычисляет выручку на основе записей и prices из settings.services."""
+        from datetime import date, timedelta
+        try:
+            today_str = date.today().isoformat()
+            week_start = (date.today() - timedelta(days=7)).isoformat()
+            month_start = (date.today() - timedelta(days=30)).isoformat()
+            services = settings.services or {}
+
+            today_appts = appt_service.get_appointments_by_date(today_str)
+            week_appts = appt_service.get_by_date_range(week_start, today_str)
+            month_appts = appt_service.get_by_date_range(month_start, today_str)
+
+            def _sum(appts) -> int:
+                total = 0
+                for a in appts:
+                    if getattr(a, 'is_cancelled', False):
+                        continue
+                    svc = a.service or ""
+                    info = services.get(svc, {})
+                    price = info.get("price") if isinstance(info, dict) else None
+                    if price is not None:
+                        try:
+                            total += int(price)
+                        except (ValueError, TypeError):
+                            pass
+                return total
+
+            return {
+                "today": _sum(today_appts),
+                "week": _sum(week_appts),
+                "month": _sum(month_appts),
+            }
+        except Exception as exc:
+            logger.warning("Ошибка вычисления выручки: %s", exc)
+            return {"today": 0, "week": 0, "month": 0}
 
     @router.message(F.text == "📢 Рассылка")
     async def admin_broadcast_start(message: Message, state: FSMContext) -> None:

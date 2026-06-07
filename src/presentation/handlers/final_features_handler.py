@@ -1,17 +1,14 @@
 """
 src/presentation/handlers/final_features_handler.py — Финальные фичи.
 
-FIXED: все оставшиеся функции:
-- /mybookings команда (фича #8)
-- Кнопки: Слоты, Контакты, Цены, Поделиться, Расписание, Отмены на час (фича #1,5,20,21,19,46,49)
-- Уведомление администратора об отсутствии слотов (фича #24)
-- Архивирование старых записей (фича #38)
-- Inline режим для поиска дат (фича #36)
+FIXED BUG-7,8,9: удалены дублирующие archive_old_appointments(), check_insufficient_slots(),
+register_scheduled_jobs(). Единственные реализации — в reminder_service.py.
+
+FIXED BUG-12: dynamic SQL заменён на фиксированные запросы.
 """
 
 import logging
 from datetime import date as _date
-from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -220,19 +217,48 @@ def setup_final_features_router(container: Container) -> Router:
     def _update_user_notif(user_id: int, **kwargs) -> None:
         """Обновляет настройки уведомлений пользователя в БД.
 
-        FIXED БАГ-КРИТ-05: используем db.transaction() из замыкания вместо
-        сырого sqlite3.connect(). Теперь соединение всегда закрывается корректно
-        (transaction() — контекстный менеджер), commit происходит автоматически,
-        rollback — при ошибке.
+        FIXED БАГ-КРИТ-05: используем db.transaction() из замыкания.
+        FIXED BUG-12: заменены динамические запросы с именем колонки из переменной
+        на отдельные фиксированные запросы для каждой колонки.
         """
+        # FIXED BUG-12: допустимые колонки — фиксированный белый список
+        _ALLOWED_COLS = {
+            "notifications_enabled",
+            "notif_24h",
+            "notif_2h",
+            "notif_1h",
+        }
         try:
             with db.transaction() as conn:
                 for col, val in kwargs.items():
-                    conn.execute(
-                        f"INSERT INTO users (user_id, {col}) VALUES (?, ?) "
-                        f"ON CONFLICT(user_id) DO UPDATE SET {col} = excluded.{col}",
-                        (user_id, val)
-                    )
+                    if col not in _ALLOWED_COLS:
+                        logger.warning("_update_user_notif: unknown column %r, skipping", col)
+                        continue
+                    # FIXED BUG-12: используем фиксированные запросы вместо f-string с именем колонки
+                    if col == "notifications_enabled":
+                        conn.execute(
+                            "INSERT INTO users (user_id, notifications_enabled) VALUES (?, ?) "
+                            "ON CONFLICT(user_id) DO UPDATE SET notifications_enabled = excluded.notifications_enabled",
+                            (user_id, val)
+                        )
+                    elif col == "notif_24h":
+                        conn.execute(
+                            "INSERT INTO users (user_id, notif_24h) VALUES (?, ?) "
+                            "ON CONFLICT(user_id) DO UPDATE SET notif_24h = excluded.notif_24h",
+                            (user_id, val)
+                        )
+                    elif col == "notif_2h":
+                        conn.execute(
+                            "INSERT INTO users (user_id, notif_2h) VALUES (?, ?) "
+                            "ON CONFLICT(user_id) DO UPDATE SET notif_2h = excluded.notif_2h",
+                            (user_id, val)
+                        )
+                    elif col == "notif_1h":
+                        conn.execute(
+                            "INSERT INTO users (user_id, notif_1h) VALUES (?, ?) "
+                            "ON CONFLICT(user_id) DO UPDATE SET notif_1h = excluded.notif_1h",
+                            (user_id, val)
+                        )
         except Exception as exc:
             logger.error("Failed to update notification settings for user %s: %s", user_id, exc)
 
@@ -301,92 +327,11 @@ def setup_final_features_router(container: Container) -> Router:
     # ═══════════════════════════════════════════════════════════════════════
     # АРХИВИРОВАНИЕ И ЧИСТКА
     # ═══════════════════════════════════════════════════════════════════════
-
-    # ── #38 Архивирование старых записей ───────────────────────────────────
-    async def archive_old_appointments() -> None:
-        """FIXED БАГ-ВЫСОК-04: фича #38 — реальное архивирование записей старше 90 дней.
-
-        Теперь:
-        1. Экспортирует старые отменённые/завершённые записи в CSV (backup_dir/archive_*.csv)
-        2. Удаляет их из БД
-
-        ВАЖНО: эта функция регистрируется в APScheduler при вызове register_scheduled_jobs().
-        """
-        import asyncio
-        import csv
-        import io
-        import os
-
-        try:
-            cutoff_date = (datetime.now() - timedelta(days=90)).date().isoformat()
-
-            # Получаем старые отменённые записи
-            all_appts = await asyncio.to_thread(appt_service.get_all)
-            old_appts = [
-                a for a in all_appts
-                if a.date < cutoff_date and a.is_cancelled
-            ]
-
-            if not old_appts:
-                logger.info("archive_old_appointments: nothing to archive (cutoff %s)", cutoff_date)
-                return
-
-            logger.info("Archiving %d old cancelled appointments (cutoff %s)", len(old_appts), cutoff_date)
-
-            # Шаг 1: экспортируем в CSV перед удалением
-            backup_dir = "data/backups"
-            os.makedirs(backup_dir, exist_ok=True)
-            from datetime import date as _date2
-            archive_filename = os.path.join(
-                backup_dir,
-                f"archive_{_date2.today().isoformat()}_cutoff_{cutoff_date}.csv"
-            )
-            output = io.StringIO()
-            writer = csv.writer(output)
-            writer.writerow(["id", "user_id", "username", "client_name", "phone",
-                              "date", "time", "service", "comment", "created_at", "is_cancelled"])
-            for a in old_appts:
-                writer.writerow([
-                    a.id, a.user_id, a.username, a.client_name, a.phone,
-                    a.date, a.time, a.service, a.comment,
-                    a.created_at.strftime("%Y-%m-%d %H:%M:%S") if a.created_at else "",
-                    int(a.is_cancelled)
-                ])
-            with open(archive_filename, "w", encoding="utf-8", newline="") as f:
-                f.write(output.getvalue())
-            logger.info("Archive exported: %s (%d records)", archive_filename, len(old_appts))
-
-            # Шаг 2: удаляем из БД
-            ids_to_delete = [a.id for a in old_appts if a.id is not None]
-            if ids_to_delete:
-                deleted = await asyncio.to_thread(appt_service.delete_appointments_by_ids, ids_to_delete)
-                logger.info("archive_old_appointments: deleted %d records from DB", deleted)
-
-        except Exception as exc:
-            logger.exception("Archive job failed: %s", exc)
-
-    # ── #24 Уведомление администратора об отсутствии слотов ────────────────
-    async def check_insufficient_slots() -> None:
-        """FIXED L-02: фича #24 — ежедневно проверяет количество свободных дней.
-
-        ВАЖНО: эта функция регистрируется в APScheduler при вызове register_scheduled_jobs().
-        Если < 3 свободных дней — отправляет уведомление администратору.
-        """
-        try:
-            available_dates = await sched_service.get_available_dates_async()
-            free_days = len(set(available_dates))  # Уникальные дни
-
-            if free_days < 3:
-                days_ahead = settings.schedule_days_ahead or 30
-                text = MessageFormatter.insufficient_slots_warning(free_days, days_ahead)
-
-                for admin_id in settings.admin_ids:
-                    try:
-                        await notif_service._safe_send(admin_id, text)
-                    except Exception as exc:
-                        logger.warning("Failed to notify admin %s: %s", admin_id, exc)
-        except Exception as exc:
-            logger.exception("Insufficient slots check failed: %s", exc)
+    # FIXED BUG-7, BUG-8, BUG-9: дублирующие функции archive_old_appointments()
+    # и check_insufficient_slots() удалены. Единственные реализации находятся
+    # в reminder_service.py (_weekly_archive_job и _insufficient_slots_check_job).
+    # Планировщик в main.py использует только reminder_service методы.
+    # register_scheduled_jobs() также удалена как мёртвый код.
 
     # ═══════════════════════════════════════════════════════════════════════
     # INLINE РЕЖИМ (@bot дата в чате)
@@ -440,34 +385,7 @@ def setup_final_features_router(container: Container) -> Router:
             logger.exception("Inline search error: %s", exc)
             await inline_query.answer([])
 
-    def register_scheduled_jobs(scheduler) -> None:
-        """FIXED L-02: регистрирует archive_old_appointments и check_insufficient_slots в APScheduler.
-
-        Вызывать после запуска планировщика (reminder_service.start()).
-
-        Args:
-            scheduler: Экземпляр APScheduler (AsyncIOScheduler).
-        """
-        try:
-            from apscheduler.triggers.cron import CronTrigger  # type: ignore
-
-            scheduler.add_job(
-                archive_old_appointments,
-                trigger=CronTrigger(day_of_week="sun", hour=4, minute=0),
-                id="final_archive_old_appointments",
-                replace_existing=True,
-            )
-            scheduler.add_job(
-                check_insufficient_slots,
-                trigger=CronTrigger(hour=11, minute=0),
-                id="final_check_insufficient_slots",
-                replace_existing=True,
-            )
-            logger.info("final_features scheduled jobs registered (archive + insufficient_slots check)")
-        except Exception:
-            logger.exception("Failed to register final_features scheduled jobs")
-
-    # Сохраняем функцию регистрации как атрибут роутера для внешнего вызова
-    router.register_scheduled_jobs = register_scheduled_jobs  # type: ignore
+    # FIXED BUG-9: register_scheduled_jobs() удалена — задачи уже зарегистрированы в
+    # reminder_service.py. Атрибут router.register_scheduled_jobs также удалён.
 
     return router

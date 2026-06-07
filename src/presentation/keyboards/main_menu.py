@@ -62,9 +62,7 @@ class MainMenuKeyboard:
         builder.row(KeyboardButton(text="🏠 Главное меню"))
         return builder.as_markup(resize_keyboard=True)
 
-    @staticmethod
-    def book_again() -> InlineKeyboardMarkup:
-        """Кнопка 'Записаться снова' после визита."""
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="💅 Записаться снова", callback_data="book_again"))
-        return builder.as_markup()
+    # FIXED BUG-14: метод book_again() удалён из MainMenuKeyboard.
+    # Используйте BookingKeyboard.book_again() — единственный источник этой кнопки.
+    # callback_data="book_again_start" соответствует хендлеру в common_handler.py.
+    # (Старая реализация использовала callback_data="book_again" — несоответствие исправлено.)

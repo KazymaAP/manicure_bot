@@ -106,6 +106,13 @@ async def main() -> None:
     reminder_service = container.reminder_service
     reminder_service.start()
     reminder_service.restore_reminders()
+    # FIXED BUG-4: загружаем список заблокировавших пользователей из БД в кэш памяти.
+    # Это гарантирует что после перезапуска бота заблокировавшие пользователи
+    # не получают уведомления (без необходимости ждать Forbidden-ошибки снова).
+    try:
+        container.notification_service.load_blocked_from_db()
+    except Exception as _e:
+        logger.warning("Failed to load blocked users from DB: %s", _e)
     # FIXED BUG-03: регистрируем задачи ТОЛЬКО в одном месте (в ReminderService).
     # Ранее archive и insufficient_slots регистрировались ДВАЖДЫ:
     #   1) через reminder_service.schedule_weekly_archive() / schedule_insufficient_slots_check()
