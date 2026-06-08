@@ -11,6 +11,7 @@ FIXED: обработчики для функций которые ещё не �
 - Webhook поддержка для групп
 """
 
+import asyncio
 import logging
 from datetime import date as _date
 from datetime import datetime
@@ -47,7 +48,6 @@ def setup_extended_features_router(container: Container) -> Router:
 
         FIXED: фича #4 — перенос записи клиентом с сохранением данных.
         """
-        import asyncio
         try:
             appt_id = int(callback.data.split(":")[1])
         except (ValueError, IndexError):
@@ -146,7 +146,6 @@ def setup_extended_features_router(container: Container) -> Router:
         Прежний подход (отменить старую → создать новую) мог привести к полной потере
         записи если создание новой провалилось.
         """
-        import asyncio
 
         # FIXED BUG-04: split(":", 1)[1] вместо split(":")[1].
         # callback_data имеет вид "time:10:00" — двоеточие присутствует в самом времени.
@@ -312,7 +311,6 @@ def setup_extended_features_router(container: Container) -> Router:
     @router.message(AdminFSM.waiting_for_history_query)
     async def admin_search_client_history(message: Message, state: FSMContext) -> None:
         """Ищет клиента и выводит его историю посещений."""
-        import asyncio
         from html import escape  # FIXED БАГ-ВЫСОК-07: HTML-экранирование пользовательских данных
 
         query = message.text.strip()
@@ -374,7 +372,6 @@ def setup_extended_features_router(container: Container) -> Router:
     @router.callback_query(F.data == "admin_monthly_stats")
     async def admin_show_monthly_stats(callback: CallbackQuery, state: FSMContext) -> None:
         """Показывает статистику по текущему месяцу."""
-        import asyncio
 
         now = datetime.now()
         stats = await asyncio.to_thread(
@@ -417,7 +414,6 @@ def setup_extended_features_router(container: Container) -> Router:
 
         FIXED: фича #12 — сохранение и применение шаблонов рабочих дней.
         """
-        import asyncio
 
         # Получаем список шаблонов из БД
         try:
@@ -463,7 +459,6 @@ def setup_extended_features_router(container: Container) -> Router:
     @router.message(AdminFSM.waiting_for_template_schedule)
     async def admin_save_template_schedule(message: Message, state: FSMContext) -> None:
         """Сохраняет шаблон."""
-        import asyncio
 
         data = await state.get_data()
         name = data.get("template_name")
@@ -491,7 +486,6 @@ def setup_extended_features_router(container: Container) -> Router:
     @router.callback_query(F.data == "admin_delete_template")
     async def admin_delete_template_start(callback: CallbackQuery, state: FSMContext) -> None:
         """Начинает удаление шаблона расписания."""
-        import asyncio
 
         try:
             templates = await asyncio.to_thread(lambda: sched_service.get_workday_templates())
@@ -521,7 +515,6 @@ def setup_extended_features_router(container: Container) -> Router:
     @router.callback_query(F.data.startswith("admin_del_tmpl_confirm:"))
     async def admin_delete_template_execute(callback: CallbackQuery) -> None:
         """Выполняет удаление шаблона по ID."""
-        import asyncio
 
         try:
             tmpl_id = int(callback.data.split(":")[1])
@@ -542,7 +535,6 @@ def setup_extended_features_router(container: Container) -> Router:
     @router.callback_query(F.data == "admin_apply_template")
     async def admin_apply_template_start(callback: CallbackQuery, state: FSMContext) -> None:
         """Показывает список шаблонов для применения к расписанию."""
-        import asyncio
 
         try:
             templates = await asyncio.to_thread(lambda: sched_service.get_workday_templates())
@@ -588,91 +580,11 @@ def setup_extended_features_router(container: Container) -> Router:
         )
         await callback.answer()
 
-    # ── #43 Кнопка «Отменить все записи» на дату ──────────────────────────
-    # FIXED: убран фильтр AdminFSM.main_menu
-    @router.callback_query(F.data == "admin_cancel_all_date")
-    async def admin_cancel_all_start(callback: CallbackQuery, state: FSMContext) -> None:
-        """Начинает процесс массовой отмены записей на дату."""
-        await state.set_state(AdminFSM.confirming_cancel_all_date)
-        await callback.message.answer(
-            "📅 Введите <b>дату</b> для отмены всех записей (формат: YYYY-MM-DD):"
-        )
-        await callback.answer()
-
-    @router.message(AdminFSM.confirming_cancel_all_date)
-    async def admin_cancel_all_confirm(message: Message, state: FSMContext) -> None:
-        """Подтверждает отмену всех записей на дату."""
-        import asyncio
-
-        date_str = message.text.strip()
-
-        # Валидируем дату
-        try:
-            datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
-            await message.answer("❌ Некорректный формат даты. Используйте YYYY-MM-DD")
-            return
-
-        # Получаем все записи на эту дату
-        appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
-
-        if not appts:
-            await message.answer(f"ℹ️ На {date_str} нет записей")
-            await state.clear()
-            return
-
-        # Показываем подтверждение
-        text = (
-            f"⚠️ <b>Отменить все {len(appts)} записей на {date_str}?</b>\n\n"
-        )
-
-        for appt in appts:
-            text += f"• {appt.time} — {appt.client_name}\n"
-
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="✅ Да, отменить все", callback_data=f"confirm_cancel_all:{date_str}"
-                    ),
-                    InlineKeyboardButton(text="❌ Отмена", callback_data="admin_main_menu"),
-                ]
-            ]
-        )
-
-        await message.answer(text, reply_markup=kb)
-        await state.clear()
-
-    @router.callback_query(F.data.startswith("confirm_cancel_all:"))
-    async def admin_cancel_all_execute(callback: CallbackQuery) -> None:
-        """Выполняет отмену всех записей на дату."""
-        import asyncio
-
-        date_str = callback.data.split(":")[1]
-
-        try:
-            appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
-
-            cancelled_count = 0
-            for appt in appts:
-                try:
-                    await asyncio.to_thread(appt_service.admin_cancel_appointment, appt.id)
-                    # Уведомляем клиента об отмене
-                    await notif_service.notify_client_cancellation_by_admin(
-                        appt.user_id, appt.date, appt.time
-                    )
-                    cancelled_count += 1
-                except Exception as exc:
-                    logger.warning("Failed to cancel appointment %s: %s", appt.id, exc)
-
-            await callback.message.answer(
-                f"✅ <b>Отменено {cancelled_count} записей на {date_str}</b>\n\n"
-                f"Клиентам отправлены уведомления об отмене."
-            )
-        except Exception as exc:
-            logger.exception("Mass cancel error: %s", exc)
-            await callback.answer("❌ Ошибка при отмене записей", show_alert=True)
-
-        await callback.answer()
+    # БАГ #2: admin_cancel_all_date — дублирует admin_handler.py.
+    # Хендлер admin_cancel_all_start (для callback "admin_cancel_all_date")
+    # и admin_cancel_all_confirm (для состояния confirming_cancel_all_date)
+    # удалены — рабочие версии в admin_handler.py.
+    # admin_cancel_all_execute (для confirm_cancel_all:DATE) также удалён —
+    # дублирует хендлер в admin_handler.py.
 
     return router

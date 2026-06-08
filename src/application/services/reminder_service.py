@@ -138,7 +138,7 @@ class ReminderService:
                 self._send_reminder_job,
                 trigger="date",
                 run_date=remind_at,
-                args=[user_id, time_str, appointment_id],
+                args=[user_id, time_str, appointment_id, hrs],
                 id=job_id,
                 replace_existing=True,
             )
@@ -191,14 +191,13 @@ class ReminderService:
         user_id: int,
         time_str: str,
         appointment_id: int,
+        hrs: int = 24,
     ) -> None:
         """Отправляет напоминание о записи.
 
         FIXED БАГ-ВЫСОК-05: перед отправкой проверяем настройки уведомлений пользователя.
-        Если пользователь отключил уведомления — пропускаем отправку.
-        Ранее ReminderService планировал ВСЕ напоминания всегда, игнорируя настройки в БД.
+        FIXED БАГ #20: проверяем отдельные флаги notif_24h/notif_2h/notif_1h на основе hrs.
         """
-        # Получаем информацию о записи, чтобы знать за сколько часов это напоминание
         try:
             appt = await asyncio.to_thread(
                 self._appointment_service.get_appointment_by_id, appointment_id
@@ -210,11 +209,6 @@ class ReminderService:
                 )
                 return
 
-            # Вычисляем сколько часов до записи осталось при этом напоминании
-            # Получаем job по ID чтобы понять какой это reminder (1h, 2h или 24h)
-            # Мы не можем легко определить тип напоминания из аргументов,
-            # поэтому проверяем общий флаг notifications_enabled и отдельные флаги
-            # через попытку получить настройки из БД напрямую
             notif_settings = await asyncio.to_thread(
                 self._get_user_notif_settings_from_db, user_id
             )
@@ -223,6 +217,26 @@ class ReminderService:
             if not notif_settings.get("notifications_enabled", 1):
                 logger.info(
                     "Skipping reminder for user %s, appointment #%s: notifications disabled by user",
+                    user_id, appointment_id
+                )
+                return
+
+            # FIXED БАГ #20: проверяем индивидуальные флаги по типу напоминания
+            if hrs == 24 and not notif_settings.get("notif_24h", 1):
+                logger.info(
+                    "Skipping 24h reminder for user %s, appointment #%s: notif_24h disabled",
+                    user_id, appointment_id
+                )
+                return
+            elif hrs == 2 and not notif_settings.get("notif_2h", 1):
+                logger.info(
+                    "Skipping 2h reminder for user %s, appointment #%s: notif_2h disabled",
+                    user_id, appointment_id
+                )
+                return
+            elif hrs == 1 and not notif_settings.get("notif_1h", 1):
+                logger.info(
+                    "Skipping 1h reminder for user %s, appointment #%s: notif_1h disabled",
                     user_id, appointment_id
                 )
                 return

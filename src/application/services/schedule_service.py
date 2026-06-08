@@ -364,6 +364,46 @@ class ScheduleService:
 
         return await asyncio.to_thread(_toggle)
 
+    def get_workday_template(self, template_id: int) -> dict | None:
+        """Возвращает шаблон расписания по ID."""
+        templates = self._schedule_repo.get_workday_templates()
+        for t in templates:
+            if t.get("id") == template_id:
+                return t
+        return None
+
+    def apply_template_to_date(self, template_id: int, date_str: str) -> int:
+        """Применяет шаблон расписания к конкретной дате.
+
+        Парсит строку slots из шаблона (формат: "09:00, 10:00, 11:00"),
+        создаёт рабочий день и добавляет слоты.
+        Если день уже существует — добавляет слоты через add_time_slot.
+        Возвращает количество добавленных слотов.
+        """
+        template = self.get_workday_template(template_id)
+        if not template:
+            raise ValueError(f"Template {template_id} not found")
+        slots_str = template.get("slots", "")
+        slots = [s.strip() for s in slots_str.split(",") if s.strip()]
+
+        # Убедиться что рабочий день существует
+        day = self._schedule_repo.get_working_day(date_str)
+        if not day:
+            success = self._schedule_repo.add_working_day(date_str, slots)
+            if success:
+                return len(slots)
+            # Если add_working_day вернул False — день уже существует, добавляем слоты поштучно
+
+        # Добавляем слоты поштучно (для уже существующего дня)
+        added = 0
+        for slot_time in slots:
+            try:
+                if self._schedule_repo.add_time_slot(date_str, slot_time):
+                    added += 1
+            except Exception:
+                pass
+        return added
+
     def count_free_slots(self) -> int:
         """Возвращает общее количество свободных слотов во всех доступных рабочих днях.
 

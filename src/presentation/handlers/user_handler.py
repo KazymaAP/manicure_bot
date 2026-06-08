@@ -5,6 +5,7 @@ src/presentation/handlers/user_handler.py — FSM-обработчики для 
 напоминание с кнопками «Буду!» / «Отменить», благодарность после визита.
 """
 
+import asyncio
 import logging
 import re
 from datetime import date as _date
@@ -74,7 +75,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         )
 
         # Предлагаем использовать прошлые данные если они есть
-        import asyncio  # noqa: PLC0415 — asyncio уже импортирован выше, дублирование для ясности
         try:
             prev = await asyncio.to_thread(appt_service.get_user_appointments, message.from_user.id)
             if prev:
@@ -119,7 +119,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data == "use_prev")
     async def use_previous_data(callback: CallbackQuery, state: FSMContext) -> None:
         """Автозаполнение имени и телефона из последней записи."""
-        import asyncio
         appts = await asyncio.to_thread(appt_service.get_user_appointments, callback.from_user.id)
         if not appts:
             await callback.answer("Прошлых записей не найдено.", show_alert=True)
@@ -316,7 +315,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             )
             return
 
-        import asyncio
         try:
             appointment_id = await asyncio.to_thread(
                 appt_service.create_appointment,
@@ -400,7 +398,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.message(F.text == "📋 Мои записи")
     async def my_appointments(message: Message) -> None:
         """Показывает список активных записей клиента."""
-        import asyncio
 
         # Проверка подписки
         if settings.required_channel and message.from_user.id not in settings.admin_ids:
@@ -439,7 +436,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         appt_id = int(callback.data.split(":")[1])
         await callback.answer("Отлично, ждём тебя! 🌸")
         try:
-            import asyncio
             await asyncio.to_thread(appt_service.mark_reminder_sent, appt_id)
         except Exception:
             logger.exception("Failed to mark reminder as sent for %s", appt_id)
@@ -448,7 +444,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data.startswith("reminder_no:"))
     async def reminder_no(callback: CallbackQuery) -> None:
         appt_id = int(callback.data.split(":")[1])
-        import asyncio
         try:
             appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
             if not appt or appt.user_id != callback.from_user.id:
@@ -467,7 +462,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     # ── Отмена записи (из списка «Мои записи») ────────────────────────────
     @router.callback_query(F.data.startswith("cancel_appt:"))
     async def cancel_appointment(callback: CallbackQuery) -> None:
-        import asyncio
         appt_id = int(callback.data.split(":")[1])
         answered = False
         try:
@@ -501,7 +495,6 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         Парсит дату и время из callback_data, проверяет что слот ещё свободен,
         и запускает процесс бронирования.
         """
-        import asyncio
         # Формат: waitlist_book:{date}:{time_with_dashes}
         parts = callback.data.split(":", 2)
         if len(parts) < 3:

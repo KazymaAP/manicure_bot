@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 Format: [Semantic Versioning](https://semver.org/)
 
+## [4.3.0] — 2026-06-08 (Bug Fixes & Refactoring)
+
+### Fixed — Критические баги исправлены
+
+- **Баг #1** (`admin_handler.py`): Убран двойной вызов `callback.answer()` в `admin_edit_services` — второй вызов вызывал `TelegramBadRequest`
+- **Баг #2** (`extended_features_handler.py`): `callback_data="admin_main_menu"` в кнопке подтверждения массовой отмены заменён на `admin_back_main` (рабочий хендлер)
+- **Баг #3** (`admin_handler.py`, `schedule_service.py`): Реализовано применение шаблона расписания к дате — добавлен метод `apply_template_to_date` в `ScheduleService` и проверка `apply_template_id` в хендлере `admin_add_slot_date`
+- **Баг #4** (`admin_handler.py`): Добавлен отдельный хендлер `admin_edit_photo_url` для FSM-состояния `waiting_for_photo_url` — URL фото приветствия теперь корректно сохраняется в config.json
+- **Баг #5** (`admin_handler.py`, `extended_features_handler.py`): Удалён дублирующий хендлер `admin_client_history_search` в `admin_handler.py` — теперь используется только правильный SQL-поиск через `search_appointments_by_client` в `extended_features_handler.py`
+- **Баг #6** (`extended_features_handler.py`): Удалён дублирующий хендлер `admin_cancel_all_execute` — оставлен только в `admin_handler.py`
+- **Баг #7** (`admin_handler.py`): Заменён `get_appointments_filtered("all")` на `get_appointments_by_date(date_str)` в функциях `admin_cancel_all_date` и `admin_confirm_cancel_all` — устранена загрузка всех записей в память
+- **Баг #8** (`extended_features_handler.py`): Удалены дублирующие `admin_cancel_all_start` и `admin_cancel_all_confirm` — оставлены рабочие версии в `admin_handler.py`
+
+### Fixed — Дублирование кода
+
+- **Баг #10** (`user_handler.py`): `import asyncio` вынесен на уровень модуля, удалены 8 локальных импортов внутри функций
+- **Баг #11** (`extended_features_handler.py`): `import asyncio` вынесен на уровень модуля, удалены все локальные импорты
+- **Баг #12** (`final_features_handler.py`): `import asyncio` вынесен на уровень модуля, удалены все локальные импорты
+- **Баг #13** (`admin_handler.py`): `InlineKeyboardButton, InlineKeyboardMarkup` добавлены в общий импорт файла, удалены два локальных импорта внутри функций
+
+### Fixed — Безопасность и качество
+
+- **Баг #14** (`admin_handler.py`, `fsm_states.py`): FSM-конфликт устранён — добавлены три отдельных состояния: `waiting_for_welcome_text`, `waiting_for_photo_url`, `waiting_for_broadcast_text`; соответствующие хендлеры разделены
+- **Баг #15** (`admin_handler.py`): Path traversal устранён — `config_path` в `admin_edit_welcome` нормализован через `os.path.normpath`
+- **Баг #16** (`admin_handler.py`): Добавлена валидация URL фото: проверка `startswith("https://")` и отсутствия пробелов
+- **Баг #17** (`final_features_handler.py`): После переключения уведомлений (24h/2h/1h) клавиатура теперь обновляется через `edit_reply_markup` — иконки 🔔/🔕 отображаются актуально
+
+### Added — Новый функционал
+
+- **Баг #18/3** (`schedule_service.py`): Метод `apply_template_to_date` добавлен в `ScheduleService` с корректной обработкой дублирования слотов
+- **Баг #19** (`common_handler.py`): Добавлен хендлер-псевдоним `book_again_compat` для обратной совместимости со старым `callback_data="book_again"`
+- **Баг #20** (`reminder_service.py`): Параметр `hrs` добавлен в `_send_reminder_job`; теперь проверяются отдельные флаги `notif_24h`, `notif_2h`, `notif_1h` перед отправкой
+
+### Infrastructure
+
+- **Баг #24**: Добавлена миграция `006_add_appointments_date_index.sql` — составной индекс `(date, is_cancelled)` и `(user_id, is_cancelled)` для таблицы `appointments`
+
+---
+
 ## [4.2.0] — 2026-06-02 (Fixed & Improved)
 
 ### Fixed — Баги исправлены

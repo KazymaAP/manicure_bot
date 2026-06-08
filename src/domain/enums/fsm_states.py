@@ -88,3 +88,8 @@ class AdminFSM(StatesGroup):
     waiting_for_service_select = State()    # выбор услуги для редактирования/удаления
     waiting_for_message_client = State()    # ввод текста сообщения клиенту
     waiting_for_message_user_id = State()   # ввод Telegram ID клиента
+
+    # FIXED БАГ #14: отдельные состояния вместо переиспользования waiting_for_broadcast
+    waiting_for_welcome_text = State()      # редактирование текста приветствия
+    waiting_for_photo_url = State()         # редактирование URL фото приветствия
+    waiting_for_broadcast_text = State()    # рассылка сообщений

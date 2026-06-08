@@ -7,6 +7,7 @@ register_scheduled_jobs(). Единственные реализации — в 
 FIXED BUG-12: dynamic SQL заменён на фиксированные запросы.
 """
 
+import asyncio
 import logging
 from datetime import date as _date
 
@@ -46,7 +47,6 @@ def setup_final_features_router(container: Container) -> Router:
     @router.message(Command("mybookings"))
     async def cmd_my_bookings(message: Message) -> None:
         """FIXED: фича #8 — команда для быстрого доступа к записям."""
-        import asyncio
 
         user_id = message.from_user.id
         appts = await asyncio.to_thread(appt_service.get_user_appointments, user_id)
@@ -153,7 +153,6 @@ def setup_final_features_router(container: Container) -> Router:
     @router.message(F.text == "🔔 Уведомления")
     async def manage_notifications(message: Message) -> None:
         """FIXED BUG-09: фича #49 — управление уведомлениями и напоминаниями."""
-        import asyncio
 
         from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -262,67 +261,103 @@ def setup_final_features_router(container: Container) -> Router:
         except Exception as exc:
             logger.error("Failed to update notification settings for user %s: %s", user_id, exc)
 
+    from aiogram.types import InlineKeyboardButton as _IKB, InlineKeyboardMarkup as _IKM
+
+    def _build_notif_keyboard(notif_settings: dict) -> _IKM:
+        """FIXED БАГ #17: строит актуальную клавиатуру настроек уведомлений."""
+        all_on = notif_settings.get("notifications_enabled", 1)
+        h24 = notif_settings.get("notif_24h", 1)
+        h2 = notif_settings.get("notif_2h", 1)
+        h1 = notif_settings.get("notif_1h", 1)
+        return _IKM(
+            inline_keyboard=[
+                [_IKB(
+                    text=f"{'✅' if all_on else '❌'} Все уведомления",
+                    callback_data="notif_all_on" if not all_on else "notif_all_off"
+                )],
+                [_IKB(
+                    text=f"{'🔔' if h24 else '🔕'} За 24 часа",
+                    callback_data="notif_24h"
+                )],
+                [_IKB(
+                    text=f"{'🔔' if h2 else '🔕'} За 2 часа",
+                    callback_data="notif_2h"
+                )],
+                [_IKB(
+                    text=f"{'🔔' if h1 else '🔕'} За 1 час",
+                    callback_data="notif_1h"
+                )],
+            ]
+        )
+
     # FIXED BUG-09: хендлеры для всех 5 callback уведомлений (ранее отсутствовали)
     @router.callback_query(F.data == "notif_all_on")
     async def notif_all_on_handler(callback: CallbackQuery) -> None:
         """Включает все уведомления."""
-        import asyncio
         user_id = callback.from_user.id
         await asyncio.to_thread(_update_user_notif, user_id,
                                 notifications_enabled=1, notif_24h=1, notif_2h=1, notif_1h=1)
         await callback.answer("✅ Все уведомления включены", show_alert=True)
+        updated = {"notifications_enabled": 1, "notif_24h": 1, "notif_2h": 1, "notif_1h": 1}
         await callback.message.edit_text(
             "🔔 <b>Управление уведомлениями</b>\n\n"
             "Текущий статус: <b>включены ✅</b>\n\n"
             "Все напоминания активированы. Вы будете получать уведомления за 24ч, 2ч и 1ч до записи.",
+            reply_markup=_build_notif_keyboard(updated),
+            parse_mode="HTML",
         )
 
     @router.callback_query(F.data == "notif_all_off")
     async def notif_all_off_handler(callback: CallbackQuery) -> None:
         """Отключает все уведомления."""
-        import asyncio
         user_id = callback.from_user.id
         await asyncio.to_thread(_update_user_notif, user_id,
                                 notifications_enabled=0, notif_24h=0, notif_2h=0, notif_1h=0)
         await callback.answer("❌ Все уведомления отключены", show_alert=True)
+        updated = {"notifications_enabled": 0, "notif_24h": 0, "notif_2h": 0, "notif_1h": 0}
         await callback.message.edit_text(
             "🔔 <b>Управление уведомлениями</b>\n\n"
             "Текущий статус: <b>отключены ❌</b>\n\n"
             "Напоминания отключены. Нажмите '✅ Включить все' чтобы активировать снова.",
+            reply_markup=_build_notif_keyboard(updated),
+            parse_mode="HTML",
         )
 
     @router.callback_query(F.data == "notif_24h")
     async def notif_24h_handler(callback: CallbackQuery) -> None:
-        """Переключает уведомление за 24 часа."""
-        import asyncio
+        """Переключает уведомление за 24 часа. FIXED БАГ #17: обновляет клавиатуру."""
         user_id = callback.from_user.id
         current = await asyncio.to_thread(_get_user_notif_settings, user_id)
         new_val = 0 if current.get("notif_24h", 1) else 1
         await asyncio.to_thread(_update_user_notif, user_id, notif_24h=new_val)
         status = "включено 🔔" if new_val else "отключено 🔕"
         await callback.answer(f"Напоминание за 24 часа: {status}", show_alert=True)
+        updated = {**current, "notif_24h": new_val}
+        await callback.message.edit_reply_markup(reply_markup=_build_notif_keyboard(updated))
 
     @router.callback_query(F.data == "notif_2h")
     async def notif_2h_handler(callback: CallbackQuery) -> None:
-        """Переключает уведомление за 2 часа."""
-        import asyncio
+        """Переключает уведомление за 2 часа. FIXED БАГ #17: обновляет клавиатуру."""
         user_id = callback.from_user.id
         current = await asyncio.to_thread(_get_user_notif_settings, user_id)
         new_val = 0 if current.get("notif_2h", 1) else 1
         await asyncio.to_thread(_update_user_notif, user_id, notif_2h=new_val)
         status = "включено 🔔" if new_val else "отключено 🔕"
         await callback.answer(f"Напоминание за 2 часа: {status}", show_alert=True)
+        updated = {**current, "notif_2h": new_val}
+        await callback.message.edit_reply_markup(reply_markup=_build_notif_keyboard(updated))
 
     @router.callback_query(F.data == "notif_1h")
     async def notif_1h_handler(callback: CallbackQuery) -> None:
-        """Переключает уведомление за 1 час."""
-        import asyncio
+        """Переключает уведомление за 1 час. FIXED БАГ #17: обновляет клавиатуру."""
         user_id = callback.from_user.id
         current = await asyncio.to_thread(_get_user_notif_settings, user_id)
         new_val = 0 if current.get("notif_1h", 1) else 1
         await asyncio.to_thread(_update_user_notif, user_id, notif_1h=new_val)
         status = "включено 🔔" if new_val else "отключено 🔕"
         await callback.answer(f"Напоминание за 1 час: {status}", show_alert=True)
+        updated = {**current, "notif_1h": new_val}
+        await callback.message.edit_reply_markup(reply_markup=_build_notif_keyboard(updated))
 
     # ═══════════════════════════════════════════════════════════════════════
     # АРХИВИРОВАНИЕ И ЧИСТКА

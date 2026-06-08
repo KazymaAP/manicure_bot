@@ -403,7 +403,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         finally:
             await state.clear()
 
-    # Оставляем waiting_for_date для обратной совместимости (используется в extended_features)
+    # waiting_for_date: обратная совместимость с extended_features_handler
+    # (apply_template_choose_date устанавливает это состояние)
     @router.message(AdminFSM.waiting_for_date, F.text)
     async def admin_add_slot_date(message: Message, state: FSMContext) -> None:
         if message.text.strip() == "❌ Отмена":
@@ -419,6 +420,24 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         date_str = text.replace('.', '-')
 
         data = await state.get_data()
+
+        # БАГ #3: проверяем apply_template_id ПЕРЕД is_opening
+        apply_template_id = data.get("apply_template_id")
+        if apply_template_id is not None:
+            try:
+                count = await asyncio.to_thread(sched_service.apply_template_to_date, int(apply_template_id), date_str)
+                await message.answer(
+                    f"✅ Шаблон применён к <b>{date_str}</b>!\nДобавлено слотов: <b>{count}</b>",
+                    reply_markup=AdminKeyboard.main_menu(),
+                    parse_mode="HTML",
+                )
+            except Exception as exc:
+                logger.error("Ошибка применения шаблона: %s", exc)
+                await message.answer(MessageFormatter.error_general())
+            finally:
+                await state.clear()
+            return
+
         if data.get("is_opening") is not None:
             is_opening = bool(data.get("is_opening"))
             try:
@@ -721,30 +740,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await callback.answer()
 
-    @router.message(AdminFSM.waiting_for_history_query, F.text)
-    async def admin_client_history_search(message: Message, state: FSMContext) -> None:
-        if message.text.strip() == "❌ Отмена":
-            await state.clear()
-            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
-            return
-        query = message.text.strip()
-        await state.clear()
-        try:
-            all_appts = await asyncio.to_thread(appt_service.get_appointments_filtered, "all")
-            query_lower = query.lower()
-            found = [
-                a for a in all_appts
-                if query_lower in (a.client_name or "").lower()
-                or query in (a.phone or "")
-            ]
-            if not found:
-                await message.answer(f"😔 История для «{query}» не найдена.")
-                return
-            text = MessageFormatter.admin_appointments_list(found[:20], filter_name=f"клиент {query}")
-            await message.answer(text, parse_mode="HTML")
-        except Exception as exc:
-            logger.error("Ошибка истории клиента: %s", exc)
-            await message.answer(MessageFormatter.error_general())
+    # FIXED БАГ #5: Дублирующий хендлер admin_client_history_search удалён.
+    # Правильная реализация с SQL LIKE — в extended_features_handler.py (admin_search_client_history).
 
     # ════════════════════════════════════════════════════════════════════
     # РАЗДЕЛ 5: НАСТРОЙКИ
@@ -850,8 +847,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             reply_markup=AdminKeyboard.settings_services_menu(),
             parse_mode="HTML",
         )
-        await callback.answer()
-
         await callback.answer()
 
     # ════════════════════════════════════════════════════════════════════
@@ -1815,8 +1810,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.admin_invalid_date_format())
             return
         try:
-            appointments = await asyncio.to_thread(appt_service.get_appointments_filtered, "all")
-            day_appts = [a for a in appointments if a.date == date_str and not getattr(a, 'is_cancelled', False)]
+            day_appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
             if not day_appts:
                 await state.clear()
                 await message.answer(f"На {date_str} нет активных записей.", reply_markup=AdminKeyboard.main_menu())
@@ -1837,8 +1831,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         date_str = callback.data.split(":")[1]
         try:
-            appointments = await asyncio.to_thread(appt_service.get_appointments_filtered, "all")
-            day_appts = [a for a in appointments if a.date == date_str and not getattr(a, 'is_cancelled', False)]
+            day_appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
             cancelled = 0
             for appt in day_appts:
                 try:

@@ -225,6 +225,12 @@ def setup_common_router(container: Container) -> Router:
         )
         await callback.answer()
 
+    # ── Обратная совместимость: старый callback book_again ─────────────────
+    @router.callback_query(F.data == "book_again")
+    async def book_again_compat(callback: CallbackQuery, state: FSMContext) -> None:
+        """FIXED БАГ #19: обратная совместимость со старым callback_data 'book_again'."""
+        await book_again_start(callback, state)
+
     # ── Inline callback: возврат в главное меню ───────────────────────────
     @router.callback_query(F.data == "main_menu")
     async def inline_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
