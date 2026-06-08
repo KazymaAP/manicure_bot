@@ -69,6 +69,8 @@ def setup_extended_features_router(container: Container) -> Router:
             await callback.answer("❌ Запись уже отменена", show_alert=True)
             return
 
+        # БАГ 24 FIX: явная очистка FSM перед новым переносом, предотвращает конкурентные переносы
+        await state.clear()
         # Сохраняем оригинальную запись в state
         await state.update_data(
             transfer_source_appt_id=appt_id,
@@ -340,7 +342,13 @@ def setup_extended_features_router(container: Container) -> Router:
         """Ищет клиента и выводит его историю посещений."""
         from html import escape  # FIXED БАГ-ВЫСОК-07: HTML-экранирование пользовательских данных
 
-        query = message.text.strip()
+        # БАГ 17 FIX: обработка отмены
+        if message.text and message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer("Действие отменено.", reply_markup=AdminKeyboard.main_menu())
+            return
+
+        query = message.text.strip() if message.text else ""
         if not query or len(query) < 2:
             await message.answer("❌ Минимум 2 символа для поиска")
             return
@@ -430,12 +438,16 @@ def setup_extended_features_router(container: Container) -> Router:
             f"  {peak_hours_text or 'Нет данных'}\n"
         )
 
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
         # BUG 13 FIX: InlineKeyboardButton/InlineKeyboardMarkup импортированы в начале файла
         back_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад к фильтрам", callback_data="admin_back_main")]
         ])
-        await callback.message.edit_text(text, reply_markup=back_kb, parse_mode="HTML")
+        # БАГ 1 / БАГ 21 FIX: проверка типа msg — edit_text недоступен на InaccessibleMessage
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
+        await msg.edit_text(text, reply_markup=back_kb, parse_mode="HTML")
         await callback.answer()
 
     # ── #12 Шаблоны расписания ────────────────────────────────────────────
@@ -493,8 +505,13 @@ def setup_extended_features_router(container: Container) -> Router:
         """Сохраняет шаблон."""
 
         data = await state.get_data()
+        # БАГ 5 FIX: проверяем и валидируем name перед передачей в save_workday_template
         name = data.get("template_name")
-        schedule = message.text.strip()
+        if not name or not isinstance(name, str):
+            await message.answer("❌ Ошибка: название шаблона не задано.")
+            await state.clear()
+            return
+        schedule = message.text.strip() if message.text else ""
 
         try:
             await asyncio.to_thread(

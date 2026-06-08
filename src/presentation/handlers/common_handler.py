@@ -12,12 +12,13 @@ import asyncio
 import contextlib
 import logging
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src.config.dependencies import Container
+from src.config.settings import Settings
 from src.domain.enums.fsm_states import BookingFSM
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.booking import BookingKeyboard
@@ -26,12 +27,12 @@ from src.presentation.keyboards.main_menu import MainMenuKeyboard
 logger = logging.getLogger(__name__)
 
 
-def _get_portfolio(settings) -> str | None:
+def _get_portfolio(settings: Settings) -> str | None:
     """Возвращает URL портфолио или None если не задан."""
     return settings.portfolio_url
 
 
-async def check_subscription(user_id: int, bot, settings) -> bool:
+async def check_subscription(user_id: int, bot: Bot, settings: Settings) -> bool:
     """
     BUG 2.1 FIX: Проверяет подписку пользователя на канал.
     Вынесена на уровень модуля для переиспользования в user_handler.py.
@@ -79,6 +80,10 @@ def setup_common_router(container: Container) -> Router:
         is_subscribed = await _check_subscription(user_id, message.bot)
 
         if not is_subscribed:
+            # БАГ 2 FIX: required_channel может быть None — добавляем guard
+            if not settings.required_channel:
+                await message.answer("❌ Подписка на канал не настроена")
+                return
             await message.answer(
                 MessageFormatter.error_subscription_required(settings.required_channel),
                 reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
@@ -105,10 +110,12 @@ def setup_common_router(container: Container) -> Router:
         welcome_text = MessageFormatter.welcome_banner(display_name)
 
         # Отправляем фото приветствия, если оно задано в настройках
-        if getattr(settings, 'welcome_photo_url', None):
+        # БАГ 3 FIX: явная проверка и типизированная переменная photo_url: str
+        photo_url = settings.welcome_photo_url
+        if photo_url:
             try:
                 await message.answer_photo(
-                    photo=settings.welcome_photo_url,
+                    photo=photo_url,
                     caption=welcome_text,
                     reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
                     parse_mode="HTML",
@@ -127,16 +134,27 @@ def setup_common_router(container: Container) -> Router:
     @router.callback_query(F.data == "check_subscription")
     async def check_subscription_cb(callback: CallbackQuery) -> None:
         """Обработчик кнопки 'Я подписалась' — перепроверяет подписку."""
+        # БАГ 1 FIX: проверка типа msg — edit_text недоступен на InaccessibleMessage
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
+
         user_id = callback.from_user.id
         is_subscribed = await _check_subscription(user_id, callback.bot)
         if is_subscribed:
             is_admin = user_id in settings.admin_ids
             portfolio = _get_portfolio(settings)
             display_name = callback.from_user.first_name or callback.from_user.username or "дорогой гость"
-            await callback.message.edit_text(
+            # БАГ 1 FIX: edit_text не поддерживает ReplyKeyboardMarkup.
+            # Сначала убираем inline-кнопки, затем отправляем ReplyKeyboard отдельным сообщением.
+            await msg.edit_text(
                 MessageFormatter.welcome_banner(display_name),
-                reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
                 parse_mode="HTML",
+            )
+            await msg.answer(
+                MessageFormatter.main_menu_title(),
+                reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
             )
             await callback.answer("Проверка пройдена — добро пожаловать! 🌸")
         else:

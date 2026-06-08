@@ -2,6 +2,7 @@
 """Точка входа: инициализация бота, диспетчера, планировщика и запуск polling."""
 
 import asyncio
+import contextlib
 import logging
 
 from aiogram import Bot, Dispatcher
@@ -14,6 +15,8 @@ from src.config.logging_config import setup_logging
 from src.config.settings import get_settings
 from src.presentation.handlers.admin_handler import setup_admin_router
 from src.presentation.handlers.common_handler import setup_common_router
+from src.presentation.handlers.extended_features_handler import setup_extended_features_router
+from src.presentation.handlers.final_features_handler import setup_final_features_router
 from src.presentation.handlers.user_handler import setup_user_router
 from src.presentation.middlewares.logging_middleware import LoggingMiddleware
 
@@ -78,6 +81,16 @@ async def main() -> None:
     container.build_services(bot)
     logger.info("Контейнер зависимостей инициализирован")
 
+    # БАГ 23 FIX: регистрируем команды бота в меню Telegram
+    from aiogram.types import BotCommand
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Начать работу с ботом"),
+        BotCommand(command="help", description="Справка"),
+        BotCommand(command="mybookings", description="Мои записи"),
+        BotCommand(command="slots", description="Ближайшие свободные слоты"),
+        BotCommand(command="cancel", description="Отменить текущее действие"),
+    ])
+
     # ── Middleware ────────────────────────────────────────────────────────
     logging_mw = LoggingMiddleware()
     dp.message.middleware(logging_mw)
@@ -95,9 +108,7 @@ async def main() -> None:
     dp.include_router(setup_common_router(container))
     dp.include_router(setup_user_router(container))
     dp.include_router(setup_admin_router(container))
-    # FIXED: подключаем роутеры расширенных и финальных фич
-    from src.presentation.handlers.extended_features_handler import setup_extended_features_router
-    from src.presentation.handlers.final_features_handler import setup_final_features_router
+    # FIXED: подключаем роутеры расширенных и финальных фич (импорты в начале файла)
     dp.include_router(setup_extended_features_router(container))
     final_router = setup_final_features_router(container)
     dp.include_router(final_router)
@@ -157,15 +168,11 @@ async def main() -> None:
     finally:
         # Грамотно останавливаем health server
         if health_server:
-            try:
+            with contextlib.suppress(Exception):
                 await health_server.shutdown()
-            except Exception:
-                pass
         # Грамотно останавливаем сервис напоминаний и ресурсы контейнера
-        try:
+        with contextlib.suppress(Exception):
             reminder_service.shutdown()
-        except Exception:
-            pass
         await container.shutdown()
         await bot.session.close()
         # Закрываем FSM Storage gracefully если это не MemoryStorage

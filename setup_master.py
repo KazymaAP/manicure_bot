@@ -11,10 +11,9 @@ setup_master.py — Интерактивный скрипт настройки �
 
 import json
 import os
-import re
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 
 
 def print_header():
@@ -227,7 +226,7 @@ MAX_APPOINTMENTS_PER_USER=1
     )
 
     after_visit_text = (
-        f"Спасибо, что была у меня, {{name}}! 🌷\n\n"
+        "Спасибо, что была у меня, {name}! 🌷\n\n"
         "Надеюсь, тебе всё понравилось. Буду рада видеть тебя снова!\n"
         "Если хочешь — запишись уже сейчас 😊"
     )

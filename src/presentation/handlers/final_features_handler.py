@@ -10,12 +10,14 @@ FIXED BUG-12: dynamic SQL заменён на фиксированные зап�
 import asyncio
 import logging
 from datetime import date as _date
+from typing import cast
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
     InlineQuery,
+    InlineQueryResult,
     InlineQueryResultArticle,
     InputTextMessageContent,
     Message,
@@ -171,13 +173,17 @@ def setup_final_features_router(container: Container) -> Router:
             reply_markup=kb,
         )
 
-    def _update_user_notif(user_id: int, **kwargs) -> None:
+    def _update_user_notif(user_id: int, **kwargs: int) -> None:
         """Обновляет настройки уведомлений пользователя в БД.
 
         FIXED БАГ-КРИТ-05: используем db.transaction() из замыкания.
         FIXED BUG-12: заменены динамические запросы с именем колонки из переменной
         на отдельные фиксированные запросы для каждой колонки.
         """
+        # БАГ 20 FIX: проверка что db инициализирован
+        if db is None:
+            logger.error("_update_user_notif: db is None, cannot update notifications for user %s", user_id)
+            return
         # FIXED BUG-12: допустимые колонки — фиксированный белый список
         _allowed_cols = {
             "notifications_enabled",
@@ -361,7 +367,8 @@ def setup_final_features_router(container: Container) -> Router:
                 )
                 results.append(result)
 
-            await inline_query.answer(results)
+            # БАГ 6 FIX: явный cast к list[InlineQueryResult] для корректной типизации
+            await inline_query.answer(cast(list[InlineQueryResult], results))
         except Exception as exc:
             logger.exception("Inline search error: %s", exc)
             await inline_query.answer([])

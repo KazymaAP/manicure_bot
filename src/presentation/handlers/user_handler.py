@@ -55,6 +55,10 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         # вместо дублирующей inline-логики
         is_subscribed = await check_subscription(message.from_user.id, message.bot, settings)
         if not is_subscribed:
+            # БАГ 2 FIX: required_channel может быть None — добавляем guard
+            if not settings.required_channel:
+                await message.answer("❌ Подписка на канал не настроена")
+                return
             await message.answer(
                 MessageFormatter.error_subscription_required(settings.required_channel),
                 reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
@@ -89,8 +93,13 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         await state.update_data(service=svc)
 
         available_dates = await sched_service.get_available_dates_async()
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
         if not available_dates:
-            await callback.message.answer(
+            await msg.answer(
                 MessageFormatter.no_available_dates(),
                 parse_mode="HTML",
             )
@@ -104,7 +113,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             available_dates=set(available_dates),
         )
         await state.set_state(BookingFSM.choosing_date)
-        await callback.message.edit_text(
+        await msg.edit_text(
             MessageFormatter.choose_date(),
             reply_markup=cal,
             parse_mode="HTML",
@@ -160,7 +169,12 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             month=month,
             available_dates=set(available_dates),
         )
-        await callback.message.edit_reply_markup(reply_markup=cal)
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
+        await msg.edit_reply_markup(reply_markup=cal)
         await callback.answer()
 
     # ── Выбор даты ────────────────────────────────────────────────────────
@@ -168,6 +182,11 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     async def choose_date(callback: CallbackQuery, state: FSMContext) -> None:
         """Показывает слоты времени для выбранной даты."""
         _, date_str = callback.data.split(":", 1)
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
         slots = await sched_service.get_available_slots(date_str)
         if not slots:
             from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -178,7 +197,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 )
             ]])
             await callback.answer(MessageFormatter.no_available_slots(), show_alert=True)
-            await callback.message.answer(
+            await msg.answer(
                 MessageFormatter.no_available_slots(),
                 reply_markup=kb,
                 parse_mode="HTML",
@@ -187,7 +206,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
 
         await state.update_data(chosen_date=date_str)
         await state.set_state(BookingFSM.choosing_time)
-        await callback.message.edit_text(
+        await msg.edit_text(
             MessageFormatter.choose_time(),
             reply_markup=BookingKeyboard.time_slots(date_str, slots),
         )
@@ -205,19 +224,24 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         parts = callback.data.split(":", 2)
         time_str = parts[2].replace("-", ":")
         await state.update_data(chosen_time=time_str)
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
 
         data = await state.get_data()
         # Если данные уже заполнены (из прошлой записи или переноса) — сразу к комментарию
         if data.get("client_name") and data.get("phone"):
             await state.set_state(BookingFSM.entering_comment)
-            await callback.message.edit_text(
+            await msg.edit_text(
                 MessageFormatter.enter_comment(),
                 reply_markup=BookingKeyboard.skip_comment(),
                 parse_mode="HTML",
             )
         else:
             await state.set_state(BookingFSM.entering_name)
-            await callback.message.edit_text(
+            await msg.edit_text(
                 MessageFormatter.enter_name(),
                 parse_mode="HTML",
             )
@@ -273,7 +297,11 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     async def skip_comment(callback: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(comment=None)
         await callback.answer()
-        await _show_confirmation(callback.message, state)
+        # БАГ 1 FIX: проверка типа msg перед передачей в _show_confirmation
+        msg = callback.message
+        if not isinstance(msg, Message):
+            return
+        await _show_confirmation(msg, state)
 
     async def _show_confirmation(message: Message, state: FSMContext) -> None:
         """Показывает карточку записи для подтверждения."""
@@ -297,6 +325,10 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(BookingFSM.confirming, F.data == "booking_confirm")
     async def confirm_booking(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            return
         data = await state.get_data()
         user_id = callback.from_user.id
 
@@ -305,7 +337,7 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         missing = [k for k in required_keys if not data.get(k)]
         if missing:
             await state.clear()
-            await callback.message.answer(
+            await msg.answer(
                 "⚠️ Данные записи устарели (бот мог быть перезапущен).\n"
                 "Пожалуйста, начните запись заново: нажмите «💅 Записаться» 🌸"
             )
@@ -352,26 +384,26 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
                 hours_before=settings.reminder_hours_before,
                 client_name=data.get("client_name", ""),
             )
-            await callback.message.edit_text(success_text, parse_mode="HTML")
-            await callback.message.answer(
+            await msg.edit_text(success_text, parse_mode="HTML")
+            await msg.answer(
                 MessageFormatter.main_menu_title(),
                 reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
             )
 
         except SlotAlreadyBookedError:
-            await callback.message.answer(MessageFormatter.slot_already_taken())
+            await msg.answer(MessageFormatter.slot_already_taken())
         except Exception as exc:
             from src.domain.exceptions.appointment import (
                 BlacklistedUserError,
                 MaxAppointmentsReachedError,
             )
             if isinstance(exc, BlacklistedUserError):
-                await callback.message.answer(MessageFormatter.user_blocked())
+                await msg.answer(MessageFormatter.user_blocked())
             elif isinstance(exc, MaxAppointmentsReachedError):
-                await callback.message.answer(MessageFormatter.max_appointments_reached(exc.max_count))
+                await msg.answer(MessageFormatter.max_appointments_reached(exc.max_count))
             else:
                 logger.error("Ошибка создания записи для %s: %s", user_id, exc)
-                await callback.message.answer(MessageFormatter.error_general())
+                await msg.answer(MessageFormatter.error_general())
         finally:
             try:
                 await state.clear()
@@ -383,8 +415,13 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         await state.clear()
         is_admin = callback.from_user.id in settings.admin_ids
         portfolio = _get_portfolio(settings)
-        await callback.message.edit_text(MessageFormatter.booking_cancelled_by_user())
-        await callback.message.answer(
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
+        await msg.edit_text(MessageFormatter.booking_cancelled_by_user())
+        await msg.answer(
             MessageFormatter.main_menu_title(),
             reply_markup=MainMenuKeyboard.main(is_admin=is_admin, portfolio_url=portfolio),
         )
@@ -398,6 +435,10 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         # BUG 2.1 FIX: используем общую функцию check_subscription из common_handler
         is_subscribed = await check_subscription(message.from_user.id, message.bot, settings)
         if not is_subscribed:
+            # БАГ 2 FIX: required_channel может быть None — добавляем guard
+            if not settings.required_channel:
+                await message.answer("❌ Подписка на канал не настроена")
+                return
             await message.answer(
                 MessageFormatter.error_subscription_required(settings.required_channel),
                 reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
@@ -443,9 +484,12 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             await asyncio.to_thread(appt_service.cancel_by_id, appt_id)
             await notif_service.notify_admin_cancellation(appt_id)
             await callback.answer("Запись отменена. Надеемся увидеть тебя в другой раз! 🌸")
-            await callback.message.edit_text(
-                "✅ Запись отменена.\n\nЕсли захочешь перезаписаться — нажми «💅 Записаться» 🌸"
-            )
+            # БАГ 1 FIX: проверка типа msg
+            msg_r = callback.message
+            if isinstance(msg_r, Message):
+                await msg_r.edit_text(
+                    "✅ Запись отменена.\n\nЕсли захочешь перезаписаться — нажми «💅 Записаться» 🌸"
+                )
         except Exception:
             logger.exception("Failed to cancel appointment via reminder: %s", appt_id)
             await callback.answer(MessageFormatter.error_general(), show_alert=True)
@@ -461,6 +505,11 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         """
         appt_id = int(callback.data.split(":")[1])
         answered = False
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
         try:
             await asyncio.to_thread(appt_service.cancel_appointment, appt_id, callback.from_user.id)
             await notif_service.notify_admin_cancellation(appt_id)
@@ -471,14 +520,14 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             cancel_text = MessageFormatter.appointment_cancel_success()
             if remaining:
                 # Ещё есть активные записи — показываем обновлённый список
-                await callback.message.edit_text(
+                await msg.edit_text(
                     cancel_text + "\n\n" + MessageFormatter.my_appointments_list_blocks(remaining),
                     reply_markup=BookingKeyboard.cancel_appointment_list(remaining),
                     parse_mode="HTML",
                 )
             else:
                 # Нет активных записей — кнопка записаться снова
-                await callback.message.edit_text(
+                await msg.edit_text(
                     cancel_text,
                     reply_markup=BookingKeyboard.book_again(),
                 )
@@ -540,7 +589,12 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             await state.update_data(chosen_date=date_str, chosen_time=time_str)
 
         await state.set_state(BookingFSM.choosing_service)
-        await callback.message.answer(
+        # БАГ 1 FIX: проверка типа msg
+        msg_w = callback.message
+        if not isinstance(msg_w, Message):
+            await callback.answer()
+            return
+        await msg_w.answer(
             f"✅ Отлично! Слот <b>{date_str} в {time_str}</b> свободен.\n\n"
             "Выберите услугу для записи:",
             reply_markup=BookingKeyboard.service_selection(settings.services or None),
@@ -551,7 +605,12 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data == "waitlist_decline")
     async def waitlist_decline(callback: CallbackQuery) -> None:
         """Пользователь отказался от места в листе ожидания."""
-        await callback.message.edit_text(
+        # БАГ 1 FIX: проверка типа msg
+        msg_d = callback.message
+        if not isinstance(msg_d, Message):
+            await callback.answer()
+            return
+        await msg_d.edit_text(
             "Понятно! Если понадобится — заходи снова 🌸"
         )
         await callback.answer()
@@ -572,7 +631,12 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
             available_dates=set(available_dates),
         )
         await state.set_state(BookingFSM.choosing_date)
-        await callback.message.edit_text(
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
+        await msg.edit_text(
             MessageFormatter.choose_date(),
             reply_markup=cal,
             parse_mode="HTML",

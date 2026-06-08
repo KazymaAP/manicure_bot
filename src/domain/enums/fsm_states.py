@@ -47,7 +47,7 @@ class AdminFSM(StatesGroup):
     - waiting_for_slot_date — добавление слота
     - waiting_for_toggle_date — открытие/закрытие дня
     - waiting_for_template_date — применение шаблона
-    Старое waiting_for_date оставлено для обратной совместимости с external хендлерами.
+    БАГ 15 FIX: waiting_for_date УДАЛЕНО — дублирующий мёртвый код устранён.
     """
     # main_menu = State()  # REMOVED BUG-10: состояние никогда не использовалось
     waiting_for_appointment_id = State()
@@ -58,9 +58,9 @@ class AdminFSM(StatesGroup):
     waiting_for_toggle_date = State()    # открытие/закрытие дня
     waiting_for_template_date = State()  # применение шаблона расписания
 
-    # Оставлено для обратной совместимости (используется в нескольких местах),
-    # но новые хендлеры должны использовать специфические состояния выше
-    waiting_for_date = State()
+    # БАГ 15 FIX: waiting_for_date УДАЛЕНО — мёртвый код.
+    # Хендлер admin_add_slot_date перенесён на waiting_for_slot_date.
+    # Все новые хендлеры должны использовать специфические состояния выше.
     waiting_for_time = State()
 
     # FIXED: дополнительные состояния для админ-фич

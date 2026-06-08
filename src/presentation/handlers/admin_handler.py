@@ -575,38 +575,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         finally:
             await state.clear()
 
-    # ПРОБЛЕМА 5 FIX: хендлер admin_add_slot_date переписан — удалены ветки is_opening
-    # и apply_template_id (анти-паттерн «угадывания контекста»).
-    # Эти ветки обрабатываются в своих хендлерах:
-    # - is_opening → admin_toggle_day_date (waiting_for_toggle_date)
-    # - apply_template_id → admin_apply_template_date_input (waiting_for_template_date)
-    # Данный хендлер отвечает ТОЛЬКО за добавление временного слота.
-    @router.message(AdminFSM.waiting_for_date, F.text)
-    async def admin_add_slot_date(message: Message, state: FSMContext) -> None:
-        """Обрабатывает ввод даты для добавления слота (только простое добавление слота)."""
-        if message.text.strip() == "❌ Отмена":
-            await state.clear()
-            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
-            return
-
-        text = message.text.strip()
-        if not _is_valid_date(text):
-            await message.answer(MessageFormatter.admin_invalid_date_format())
-            return
-
-        date_str = text.replace('.', '-')
-        try:
-            await asyncio.to_thread(sched_service.ensure_working_day_exists, date_str)
-        except Exception as exc:
-            logger.warning("Не удалось создать рабочий день %s: %s", date_str, exc)
-
-        await state.update_data(slot_date=date_str)
-        await state.set_state(AdminFSM.waiting_for_time)
-        await message.answer(
-            MessageFormatter.admin_enter_slot_time(),
-            reply_markup=AdminKeyboard.cancel(),
-            parse_mode="HTML",
-        )
+    # БАГ 15 FIX: хендлер admin_add_slot_date (waiting_for_date) УДАЛЁН — мёртвый дублирующий код.
+    # Функциональность полностью реализована в admin_add_slot_date_new (waiting_for_slot_date).
+    # waiting_for_date удалено из AdminFSM в fsm_states.py.
 
     # ПРОБЛЕМА 5 FIX: хендлер для применения шаблона — использует waiting_for_template_date
     @router.message(AdminFSM.waiting_for_template_date, F.text)
@@ -629,9 +600,13 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         try:
             count = await asyncio.to_thread(sched_service.apply_template_to_date, int(apply_template_id), date_str)
+            # БАГ 22 FIX: добавлена кнопка возврата к шаблонам
+            back_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 К шаблонам", callback_data="admin_templates")]
+            ])
             await message.answer(
                 f"✅ Шаблон применён к <b>{date_str}</b>!\nДобавлено слотов: <b>{count}</b>",
-                reply_markup=AdminKeyboard.main_menu(),
+                reply_markup=back_kb,
                 parse_mode="HTML",
             )
         except Exception as exc:
@@ -1542,12 +1517,15 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     @router.message(AdminFSM.waiting_for_broadcast_text, F.text)
     async def admin_broadcast_text_input(message: Message, state: FSMContext) -> None:
         """Принимает текст рассылки (отдельное состояние, не смешано с welcome/photo)."""
-        if message.text.strip() == "❌ Отмена":
+        # БАГ 7 FIX: используем message.text напрямую с проверкой
+        broadcast_text = message.text
+        if not broadcast_text:
+            await message.answer("❌ Текст сообщения пуст.")
+            return
+        if broadcast_text.strip() == "❌ Отмена":
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
-
-        broadcast_text = message.text
         if len(broadcast_text) > 4000:
             await message.answer(
                 f"⚠️ Текст слишком длинный ({len(broadcast_text)} символов). Максимум 4000."
@@ -1746,7 +1724,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         data = await state.get_data()
         text = data.get("broadcast_text")
-        if not text:
+        # БАГ 7 FIX: проверяем тип и наличие текста
+        if not text or not isinstance(text, str):
             await callback.answer("Нет текста для рассылки.")
             return
         await callback.answer("Рассылка запущена в фоне...")
@@ -1805,7 +1784,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     @router.callback_query(F.data == "admin_broadcast_cancel")
     async def admin_broadcast_cancel(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
-        await callback.message.edit_text(MessageFormatter.operation_cancelled())
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if isinstance(msg, Message):
+            await msg.edit_text(MessageFormatter.operation_cancelled())
         await callback.answer()
 
     # ── Экспорт CSV ────────────────────────────────────────────────────────
@@ -1859,11 +1841,16 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
     @router.callback_query(F.data == "admin_back_schedule")
     async def admin_back_schedule(callback: CallbackQuery) -> None:
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
         dates = await sched_service.get_all_working_dates()
         if not dates:
-            await callback.message.edit_text(MessageFormatter.admin_schedule_empty())
+            await msg.edit_text(MessageFormatter.admin_schedule_empty())
         else:
-            await callback.message.edit_text(
+            await msg.edit_text(
                 MessageFormatter.admin_choose_date(),
                 reply_markup=AdminKeyboard.schedule_dates(dates),
             )
@@ -1933,20 +1920,32 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer()
             return
         date_str = callback.data.split(":")[1]
+        # БАГ 1 FIX: проверка типа msg
+        msg = callback.message
+        if not isinstance(msg, Message):
+            await callback.answer()
+            return
         try:
             day_appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
             cancelled = 0
             for appt in day_appts:
                 try:
+                    # БАГ 4 FIX: проверяем appt.id перед передачей
+                    if appt.id is None:
+                        logger.warning("admin_confirm_cancel_all: appt.id is None, skipping")
+                        continue
                     await asyncio.to_thread(appt_service.admin_cancel_appointment, appt.id)
-                    await notif_service.notify_client_cancellation_by_admin(appt.user_id, appt.date, appt.time)
+                    try:
+                        await notif_service.notify_client_cancellation_by_admin(appt.user_id, appt.date, appt.time)
+                    except Exception as notify_exc:
+                        logger.warning("Не удалось уведомить клиента %s: %s", appt.user_id, notify_exc)
                     cancelled += 1
                 except Exception as exc:
                     logger.debug("Suppressed: cancel appt %s: %s", appt.id, exc, exc_info=True)
-            await callback.message.edit_text(f"✅ Отменено {cancelled} записей на {date_str}.", reply_markup=None)
+            await msg.edit_text(f"✅ Отменено {cancelled} записей на {date_str}.", reply_markup=None)
         except Exception as exc:
             logger.error("Ошибка массовой отмены: %s", exc)
-            await callback.message.edit_text(MessageFormatter.error_general())
+            await msg.edit_text(MessageFormatter.error_general())
         await callback.answer()
 
     return router

@@ -162,37 +162,8 @@ class Settings(BaseSettings):
         description="Ссылка на Google Maps или Яндекс.Карты",
     )
 
-    # ─── Webhook (фича #40) ──────────────────────────────────
-    # FIXED БАГ-ВЫСОК-08: webhook не реализован в main.py (удалён как мёртвый код).
-    # Поля оставлены для обратной совместимости, но игнорируются при запуске.
-    # Бот работает ТОЛЬКО в режиме long polling. WEBHOOK_URL в .env не работает.
-    # @deprecated: будут удалены в следующей версии
-    webhook_url: str | None = Field(
-        default=None,
-        description="[DEPRECATED] Webhook не реализован. Бот работает только в polling-режиме.",
-    )
-    webhook_port: int = Field(
-        default=8443,
-        description="[DEPRECATED] Webhook не реализован. Это поле игнорируется.",
-    )
-
-    # BUG 3.5 FIX: валидатор для webhook_url — предупреждает если задано
-    @field_validator("webhook_url")
-    @classmethod
-    def warn_webhook_url(cls, v: str | None) -> str | None:
-        """BUG 3.5 FIX: предупреждает при установке webhook_url.
-
-        Бот работает только в polling-режиме. WEBHOOK_URL игнорируется в main.py.
-        """
-        if v is not None:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "⚠️ webhook_url='%s' задан в .env, но ИГНОРИРУЕТСЯ — "
-                "бот работает только в polling-режиме. "
-                "Webhook не поддерживается. Удалите WEBHOOK_URL из .env.",
-                v,
-            )
-        return v
+    # БАГ 19 FIX: поля webhook_url и webhook_port УДАЛЕНЫ — устаревший мёртвый код.
+    # Webhook не реализован в main.py. Бот работает только в polling-режиме.
 
     # ─── Временная зона (FIXED) ───────────────────────────────
     timezone: str = Field(

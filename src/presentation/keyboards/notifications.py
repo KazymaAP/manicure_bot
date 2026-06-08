@@ -5,8 +5,6 @@ src/presentation/keyboards/notifications.py — Клавиатура управ�
 в соответствии с принципом разделения ответственности. Это позволяет переиспользовать
 клавиатуру из любых хендлеров без дублирования кода.
 """
-from typing import Any
-
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
