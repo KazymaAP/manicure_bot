@@ -100,6 +100,44 @@ def setup_extended_features_router(container: Container) -> Router:
         )
         await callback.answer()
 
+    # ПРОБЛЕМА 1 FIX: хендлер навигации по календарю переноса.
+    # CalendarKeyboard с prefix="transfer_cal" генерирует callback_data вида
+    # "transfer_cal_prev:YEAR:MONTH" и "transfer_cal_next:YEAR:MONTH".
+    # Без этого хендлера кнопки ◀️ и ▶️ были «мёртвыми».
+    @router.callback_query(
+        BookingFSM.transferring_choosing_date,
+        F.data.startswith("transfer_cal_prev:") | F.data.startswith("transfer_cal_next:")
+    )
+    async def transfer_calendar_navigate(callback: CallbackQuery, state: FSMContext) -> None:
+        """Навигация по месяцам календаря при переносе записи."""
+        parts = callback.data.split(":")
+        direction = parts[0]
+        year, month = int(parts[1]), int(parts[2])
+        if direction == "transfer_cal_prev":
+            month -= 1
+            if month < 1:
+                month = 12
+                year -= 1
+        else:
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+        today = _date.today()
+        if year < today.year or (year == today.year and month < today.month):
+            await callback.answer()
+            return
+        available_dates = await sched_service.get_available_dates_async()
+        from src.presentation.keyboards.calendar import CalendarKeyboard
+        cal = CalendarKeyboard.build(
+            year=year,
+            month=month,
+            available_dates=set(available_dates),
+            prefix="transfer_cal",
+        )
+        await callback.message.edit_reply_markup(reply_markup=cal)
+        await callback.answer()
+
     # FIXED C-03: CalendarKeyboard с prefix="transfer_cal" генерирует "transfer_cal_day:DATE"
     # Старый код слушал "transfer_cal_date:" — несоответствие приводило к нерабочему переносу
     @router.callback_query(BookingFSM.transferring_choosing_date, F.data.startswith("transfer_cal_day:"))
@@ -566,7 +604,8 @@ def setup_extended_features_router(container: Container) -> Router:
             return
 
         await state.update_data(apply_template_id=tmpl_id)
-        await state.set_state(AdminFSM.waiting_for_date)
+        # ПРОБЛЕМА 5 FIX: используем waiting_for_template_date вместо waiting_for_date
+        await state.set_state(AdminFSM.waiting_for_template_date)
         await callback.message.answer(
             "📅 Введите <b>дату</b> для применения шаблона (формат: YYYY-MM-DD):\n"
             "Пример: 2025-06-15"

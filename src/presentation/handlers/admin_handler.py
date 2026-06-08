@@ -575,8 +575,15 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         finally:
             await state.clear()
 
+    # ПРОБЛЕМА 5 FIX: хендлер admin_add_slot_date переписан — удалены ветки is_opening
+    # и apply_template_id (анти-паттерн «угадывания контекста»).
+    # Эти ветки обрабатываются в своих хендлерах:
+    # - is_opening → admin_toggle_day_date (waiting_for_toggle_date)
+    # - apply_template_id → admin_apply_template_date_input (waiting_for_template_date)
+    # Данный хендлер отвечает ТОЛЬКО за добавление временного слота.
     @router.message(AdminFSM.waiting_for_date, F.text)
     async def admin_add_slot_date(message: Message, state: FSMContext) -> None:
+        """Обрабатывает ввод даты для добавления слота (только простое добавление слота)."""
         if message.text.strip() == "❌ Отмена":
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
@@ -588,40 +595,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
 
         date_str = text.replace('.', '-')
-        data = await state.get_data()
-
-        apply_template_id = data.get("apply_template_id")
-        if apply_template_id is not None:
-            try:
-                count = await asyncio.to_thread(sched_service.apply_template_to_date, int(apply_template_id), date_str)
-                await message.answer(
-                    f"✅ Шаблон применён к <b>{date_str}</b>!\nДобавлено слотов: <b>{count}</b>",
-                    reply_markup=AdminKeyboard.main_menu(),
-                    parse_mode="HTML",
-                )
-            except Exception as exc:
-                logger.error("Ошибка применения шаблона: %s", exc)
-                await message.answer(MessageFormatter.error_general())
-            finally:
-                await state.clear()
-            return
-
-        if data.get("is_opening") is not None:
-            is_opening = bool(data.get("is_opening"))
-            try:
-                if is_opening:
-                    await asyncio.to_thread(sched_service.open_day, date_str)
-                    await message.answer(MessageFormatter.admin_day_opened(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
-                else:
-                    await asyncio.to_thread(sched_service.close_day, date_str)
-                    await message.answer(MessageFormatter.admin_day_closed(date_str), reply_markup=AdminKeyboard.main_menu(), parse_mode="HTML")
-            except Exception as exc:
-                logger.error("Ошибка при открытии/закрытии дня %s: %s", date_str, exc)
-                await message.answer(MessageFormatter.error_general())
-            finally:
-                await state.clear()
-            return
-
         try:
             await asyncio.to_thread(sched_service.ensure_working_day_exists, date_str)
         except Exception as exc:
@@ -634,6 +607,38 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             reply_markup=AdminKeyboard.cancel(),
             parse_mode="HTML",
         )
+
+    # ПРОБЛЕМА 5 FIX: хендлер для применения шаблона — использует waiting_for_template_date
+    @router.message(AdminFSM.waiting_for_template_date, F.text)
+    async def admin_apply_template_date_input(message: Message, state: FSMContext) -> None:
+        """Принимает дату для применения шаблона расписания."""
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        text = message.text.strip()
+        if not _is_valid_date(text):
+            await message.answer(MessageFormatter.admin_invalid_date_format())
+            return
+        date_str = text.replace('.', '-')
+        data = await state.get_data()
+        apply_template_id = data.get("apply_template_id")
+        if apply_template_id is None:
+            await state.clear()
+            await message.answer("❌ Ошибка: не найден ID шаблона.", reply_markup=AdminKeyboard.main_menu())
+            return
+        try:
+            count = await asyncio.to_thread(sched_service.apply_template_to_date, int(apply_template_id), date_str)
+            await message.answer(
+                f"✅ Шаблон применён к <b>{date_str}</b>!\nДобавлено слотов: <b>{count}</b>",
+                reply_markup=AdminKeyboard.main_menu(),
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.error("Ошибка применения шаблона: %s", exc)
+            await message.answer(MessageFormatter.error_general())
+        finally:
+            await state.clear()
 
     @router.message(AdminFSM.waiting_for_time, F.text)
     async def admin_add_slot_time(message: Message, state: FSMContext) -> None:
@@ -905,9 +910,13 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     # ════════════════════════════════════════════════════════════════════
 
     def _get_master_name() -> str:
-        """Читает имя мастера из config.json."""
+        """Читает имя мастера из config.json.
+
+        ПРОБЛЕМА 11 FIX: используем _load_config() вместо прямого _load_config_json()
+        для единообразия — все места читают конфиг через единую обёртку _load_config().
+        """
         try:
-            config = _load_config_json()
+            config = _load_config()
             return config.get("master", {}).get("name", "Мастер")
         except Exception as exc:
             logger.debug("Suppressed: _get_master_name error: %s", exc, exc_info=True)
@@ -1545,79 +1554,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             reply_markup=AdminKeyboard.broadcast_confirm(broadcast_text)
         )
 
-    # ── Обратная совместимость: waiting_for_broadcast — по-прежнему работает ─
-    # Оставляем для внешнего совместимого кода, но edit_mode логика разделена
-    @router.message(AdminFSM.waiting_for_broadcast, F.text)
-    async def admin_edit_setting_text(message: Message, state: FSMContext) -> None:
-        """Обработчик waiting_for_broadcast — только для совместимости.
-
-        BUG 1.2 FIX: добавлен блок elif edit_mode == 'photo' для сохранения URL.
-        BUG 2.3 FIX: новые вызовы должны использовать отдельные состояния
-        (waiting_for_welcome_text, waiting_for_photo_url, waiting_for_broadcast_text).
-        Этот хендлер остаётся для обратной совместимости.
-        """
-        if message.text.strip() == "❌ Отмена":
-            await state.clear()
-            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
-            return
-
-        data = await state.get_data()
-        edit_mode = data.get("edit_mode")
-
-        if edit_mode == "welcome":
-            # Перенаправляем в отдельный хендлер через смену состояния
-            await state.set_state(AdminFSM.waiting_for_welcome_text)
-            await admin_welcome_text_save(message, state)
-            return
-
-        elif edit_mode == "photo":
-            # BUG 1.2 FIX: обрабатываем URL фото приветствия
-            url = message.text.strip()
-            if not url.startswith("https://"):
-                await message.answer(
-                    "❌ URL должен начинаться с <code>https://</code>\n\n"
-                    "Пример: <code>https://example.com/photo.jpg</code>",
-                    parse_mode="HTML",
-                )
-                return
-            try:
-                config = await asyncio.to_thread(_load_config)
-                if "bot" not in config:
-                    config["bot"] = {}
-                config["bot"]["welcome_photo_url"] = url
-                await _save_config(config)
-                # BUG 3.2 FIX: object.__setattr__ вместо __dict__
-                object.__setattr__(settings, "welcome_photo_url", url)
-            except Exception as exc:
-                logger.error("Ошибка сохранения фото приветствия (compat): %s", exc)
-                await message.answer(MessageFormatter.error_general())
-                await state.clear()
-                return
-            await state.clear()
-            await message.answer(
-                f"✅ Фото приветствия обновлено!\n\n"
-                f"URL: <code>{url}</code>\n\n"
-                "<i>Изменения применены немедленно.</i>",
-                reply_markup=AdminKeyboard.main_menu(),
-                parse_mode="HTML",
-            )
-            return
-
-        # Обычная рассылка (edit_mode == "broadcast" или не задан)
-        broadcast_text = message.text
-        if len(broadcast_text) > 4000:
-            await message.answer(
-                f"⚠️ Текст слишком длинный ({len(broadcast_text)} символов). Максимум 4000."
-            )
-            return
-        await state.update_data(broadcast_text=broadcast_text)
-        await message.answer("Предпросмотр рассылки:", parse_mode="HTML")
-        await message.answer(
-            broadcast_text,
-            parse_mode="HTML",
-            reply_markup=AdminKeyboard.broadcast_confirm(broadcast_text)
-        )
-
     # ════════════════════════════════════════════════════════════════════
     # РАЗДЕЛ 6: ЧЁРНЫЙ СПИСОК
     # ════════════════════════════════════════════════════════════════════
@@ -1801,8 +1737,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         async def _do_broadcast() -> None:
             try:
                 all_user_ids: set = set()
+                # ПРОБЛЕМА 12 FIX: используем container.db вместо getattr(обхода инкапсуляции)
                 try:
-                    db = getattr(container, "db", None) or getattr(container, "_db", None)
+                    db = container.db
                     if db is not None:
                         def _get_all_users():
                             with db.read_connection() as conn:
@@ -1812,9 +1749,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 except Exception as exc:
                     logger.debug("Suppressed: get users for broadcast: %s", exc, exc_info=True)
 
+                # ПРОБЛЕМА 13 FIX: используем get_all_user_ids() вместо загрузки всех записей в память
                 if not all_user_ids:
-                    appts = await asyncio.to_thread(appt_service.get_all_active)
-                    all_user_ids = {a.user_id for a in appts}
+                    all_user_ids = set(await asyncio.to_thread(appt_service.get_all_user_ids))
 
                 sent = 0
                 failed = 0
@@ -1826,6 +1763,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                     except Exception:
                         failed += 1
 
+                # ПРОБЛЕМА 6 FIX: только финальный отчёт о завершении — без предварительного сообщения о запуске
                 await callback.message.answer(
                     f"✅ Рассылка завершена: отправлено {sent}, ошибок {failed}.",
                     reply_markup=AdminKeyboard.main_menu(),
@@ -1839,6 +1777,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         _broadcast_tasks.add(task)
         task.add_done_callback(_broadcast_tasks.discard)
 
+        # ПРОБЛЕМА 6 FIX: оставляем только это сообщение о запуске.
+        # Финальный отчёт придёт из _do_broadcast() по завершении (отправлено X, ошибок Y).
         await callback.message.answer(
             "📢 Рассылка запущена в фоновом режиме. Результат придёт по завершению.",
             reply_markup=AdminKeyboard.main_menu(),
@@ -1911,10 +1851,15 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             )
         await callback.answer()
 
+    # ПРОБЛЕМА 7 FIX: добавлена явная проверка is_admin и информативное сообщение.
+    # Хендлер работает без FSM-фильтра, перехватывает нажатие в любом состоянии.
     @router.callback_query(F.data == "admin_noop")
     async def admin_noop(callback: CallbackQuery) -> None:
-        """Заглушка для неактивных кнопок."""
-        await callback.answer()
+        """Заглушка для неактивных кнопок (занятые слоты)."""
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        await callback.answer("📌 Этот слот занят клиентом", show_alert=False)
 
     # ── Массовая отмена ────────────────────────────────────────────────────
     @router.message(F.text == "🚫 Массовая отмена")

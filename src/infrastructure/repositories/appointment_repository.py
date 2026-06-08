@@ -168,6 +168,22 @@ class AppointmentRepository(BaseRepository):
             ).fetchall()
         return [Appointment.from_row(dict(row)) for row in rows]
 
+    def get_all_user_ids(self) -> list[int]:
+        """ПРОБЛЕМА 13 FIX: возвращает уникальные user_id активных записей.
+
+        Использует SELECT DISTINCT вместо загрузки полных объектов Appointment,
+        что значительно снижает потребление памяти при больших объёмах данных.
+        Применяется в рассылке как fallback если таблица users недоступна.
+
+        Returns:
+            Список уникальных user_id из активных (не отменённых) записей.
+        """
+        with self._db.read_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT user_id FROM appointments WHERE is_cancelled = 0"
+            ).fetchall()
+        return [row[0] for row in rows]
+
     def get_all_active_paginated(self, limit: int = 20, offset: int = 0) -> list[Appointment]:
         """FIXED H-9: пагинированная версия get_all_active — предотвращает огромные
         сообщения Telegram (>4096 символов) при большом количестве записей.

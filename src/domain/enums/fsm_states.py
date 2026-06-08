@@ -64,7 +64,9 @@ class AdminFSM(StatesGroup):
     waiting_for_time = State()
 
     # FIXED: дополнительные состояния для админ-фич
-    waiting_for_broadcast = State()
+    # ПРОБЛЕМА 4 FIX: waiting_for_broadcast удалено — мёртвый код, нигде не вызывалось через
+    # state.set_state(AdminFSM.waiting_for_broadcast). Вместо него используются:
+    # waiting_for_broadcast_text (рассылка), waiting_for_welcome_text, waiting_for_photo_url.
     # BUG 3.1 FIX: waiting_for_export_range удалено — мёртвый код (никогда не устанавливалось)
     waiting_for_template_name = State()
     waiting_for_template_schedule = State()

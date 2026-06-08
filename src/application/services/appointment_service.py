@@ -432,6 +432,17 @@ class AppointmentService:
         """
         return self._appointment_repo.get_all_active()
 
+    def get_all_user_ids(self) -> list[int]:
+        """ПРОБЛЕМА 13 FIX: возвращает уникальные user_id из активных записей.
+
+        Делегирует в репозиторий — SELECT DISTINCT вместо загрузки полных объектов.
+        Используется как fallback в рассылке если таблица users недоступна.
+
+        Returns:
+            Список уникальных user_id (int).
+        """
+        return self._appointment_repo.get_all_user_ids()
+
     def block_user(self, user_id: int, reason: str) -> None:
         """Добавляет пользователя в чёрный список.
 

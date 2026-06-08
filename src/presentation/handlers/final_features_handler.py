@@ -15,8 +15,6 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
     InlineQuery,
     InlineQueryResultArticle,
     InputTextMessageContent,
@@ -26,6 +24,7 @@ from aiogram.types import (
 from src.config.dependencies import Container
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
+from src.presentation.keyboards.notifications import NotificationKeyboard
 
 logger = logging.getLogger(__name__)
 router = Router(name="final_features")
@@ -38,6 +37,8 @@ def setup_final_features_router(container: Container) -> Router:
     sched_service = container.schedule_service
     # FIXED БАГ-КРИТ-05: получаем db (DatabaseManager) из container вместо сырого sqlite3.connect()
     db = container.db
+    # ПРОБЛЕМА 8 FIX: используем метод сервиса вместо дублирующей локальной функции
+    # _get_user_notif_settings удалена — используем appt_service.get_user_notification_settings()
 
     # ═══════════════════════════════════════════════════════════════════════
     # КОМАНДЫ И КНОПКИ
@@ -156,12 +157,12 @@ def setup_final_features_router(container: Container) -> Router:
         """FIXED BUG-09: фича #49 — управление уведомлениями и напоминаниями."""
 
         user_id = message.from_user.id
-        # Получаем текущие настройки из БД
-        notif_settings = await asyncio.to_thread(_get_user_notif_settings, user_id)
+        # ПРОБЛЕМА 8 FIX: используем appt_service.get_user_notification_settings вместо
+        # дублирующей локальной функции _get_user_notif_settings
+        notif_settings = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
         all_on = notif_settings.get("notifications_enabled", 1)
-        # Устранено дублирование (пункт 9): используем _build_notif_keyboard вместо
-        # inline-сборки идентичной клавиатуры
-        kb = _build_notif_keyboard(notif_settings)
+        # ПРОБЛЕМА 2/9 FIX: используем NotificationKeyboard.settings из keyboards/
+        kb = NotificationKeyboard.settings(notif_settings)
         status_text = "включены ✅" if all_on else "отключены ❌"
         await message.answer(
             f"🔔 <b>Управление уведомлениями</b>\n\n"
@@ -169,27 +170,6 @@ def setup_final_features_router(container: Container) -> Router:
             "Выберите, когда получать напоминания о предстоящих записях:",
             reply_markup=kb,
         )
-
-    def _get_user_notif_settings(user_id: int) -> dict:
-        """Получает настройки уведомлений пользователя из БД.
-
-        FIXED БАГ-КРИТ-05: используем db (DatabaseManager) из замыкания вместо
-        сырого sqlite3.connect(settings.db_path). Это обеспечивает:
-        - использование WAL-режима и PRAGMA-оптимизаций
-        - корректное управление соединением (нет утечек)
-        - единообразную обработку ошибок
-        """
-        try:
-            with db.read_connection() as conn:
-                row = conn.execute(
-                    "SELECT notifications_enabled, notif_24h, notif_2h, notif_1h FROM users WHERE user_id = ?",
-                    (user_id,)
-                ).fetchone()
-                if row:
-                    return dict(row)
-        except Exception:
-            pass
-        return {"notifications_enabled": 1, "notif_24h": 1, "notif_2h": 1, "notif_1h": 1}
 
     def _update_user_notif(user_id: int, **kwargs) -> None:
         """Обновляет настройки уведомлений пользователя в БД.
@@ -239,32 +219,8 @@ def setup_final_features_router(container: Container) -> Router:
         except Exception as exc:
             logger.error("Failed to update notification settings for user %s: %s", user_id, exc)
 
-    def _build_notif_keyboard(notif_settings: dict) -> InlineKeyboardMarkup:
-        """FIXED БАГ #17: строит актуальную клавиатуру настроек уведомлений."""
-        all_on = notif_settings.get("notifications_enabled", 1)
-        h24 = notif_settings.get("notif_24h", 1)
-        h2 = notif_settings.get("notif_2h", 1)
-        h1 = notif_settings.get("notif_1h", 1)
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"{'✅' if all_on else '❌'} Все уведомления",
-                    callback_data="notif_all_on" if not all_on else "notif_all_off"
-                )],
-                [InlineKeyboardButton(
-                    text=f"{'🔔' if h24 else '🔕'} За 24 часа",
-                    callback_data="notif_24h"
-                )],
-                [InlineKeyboardButton(
-                    text=f"{'🔔' if h2 else '🔕'} За 2 часа",
-                    callback_data="notif_2h"
-                )],
-                [InlineKeyboardButton(
-                    text=f"{'🔔' if h1 else '🔕'} За 1 час",
-                    callback_data="notif_1h"
-                )],
-            ]
-        )
+    # ПРОБЛЕМА 2/9 FIX: _build_notif_keyboard удалена — используем NotificationKeyboard.settings()
+    # из src/presentation/keyboards/notifications.py
 
     # FIXED BUG-09: хендлеры для всех 5 callback уведомлений (ранее отсутствовали)
     @router.callback_query(F.data == "notif_all_on")
@@ -279,7 +235,7 @@ def setup_final_features_router(container: Container) -> Router:
             "🔔 <b>Управление уведомлениями</b>\n\n"
             "Текущий статус: <b>включены ✅</b>\n\n"
             "Все напоминания активированы. Вы будете получать уведомления за 24ч, 2ч и 1ч до записи.",
-            reply_markup=_build_notif_keyboard(updated),
+            reply_markup=NotificationKeyboard.settings(updated),
             parse_mode="HTML",
         )
 
@@ -295,7 +251,7 @@ def setup_final_features_router(container: Container) -> Router:
             "🔔 <b>Управление уведомлениями</b>\n\n"
             "Текущий статус: <b>отключены ❌</b>\n\n"
             "Напоминания отключены. Нажмите '✅ Включить все' чтобы активировать снова.",
-            reply_markup=_build_notif_keyboard(updated),
+            reply_markup=NotificationKeyboard.settings(updated),
             parse_mode="HTML",
         )
 
@@ -303,37 +259,40 @@ def setup_final_features_router(container: Container) -> Router:
     async def notif_24h_handler(callback: CallbackQuery) -> None:
         """Переключает уведомление за 24 часа. FIXED БАГ #17: обновляет клавиатуру."""
         user_id = callback.from_user.id
-        current = await asyncio.to_thread(_get_user_notif_settings, user_id)
+        # ПРОБЛЕМА 8 FIX: используем appt_service.get_user_notification_settings
+        current = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
         new_val = 0 if current.get("notif_24h", 1) else 1
         await asyncio.to_thread(_update_user_notif, user_id, notif_24h=new_val)
         status = "включено 🔔" if new_val else "отключено 🔕"
         await callback.answer(f"Напоминание за 24 часа: {status}", show_alert=True)
         updated = {**current, "notif_24h": new_val}
-        await callback.message.edit_reply_markup(reply_markup=_build_notif_keyboard(updated))
+        await callback.message.edit_reply_markup(reply_markup=NotificationKeyboard.settings(updated))
 
     @router.callback_query(F.data == "notif_2h")
     async def notif_2h_handler(callback: CallbackQuery) -> None:
         """Переключает уведомление за 2 часа. FIXED БАГ #17: обновляет клавиатуру."""
         user_id = callback.from_user.id
-        current = await asyncio.to_thread(_get_user_notif_settings, user_id)
+        # ПРОБЛЕМА 8 FIX: используем appt_service.get_user_notification_settings
+        current = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
         new_val = 0 if current.get("notif_2h", 1) else 1
         await asyncio.to_thread(_update_user_notif, user_id, notif_2h=new_val)
         status = "включено 🔔" if new_val else "отключено 🔕"
         await callback.answer(f"Напоминание за 2 часа: {status}", show_alert=True)
         updated = {**current, "notif_2h": new_val}
-        await callback.message.edit_reply_markup(reply_markup=_build_notif_keyboard(updated))
+        await callback.message.edit_reply_markup(reply_markup=NotificationKeyboard.settings(updated))
 
     @router.callback_query(F.data == "notif_1h")
     async def notif_1h_handler(callback: CallbackQuery) -> None:
         """Переключает уведомление за 1 час. FIXED БАГ #17: обновляет клавиатуру."""
         user_id = callback.from_user.id
-        current = await asyncio.to_thread(_get_user_notif_settings, user_id)
+        # ПРОБЛЕМА 8 FIX: используем appt_service.get_user_notification_settings
+        current = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
         new_val = 0 if current.get("notif_1h", 1) else 1
         await asyncio.to_thread(_update_user_notif, user_id, notif_1h=new_val)
         status = "включено 🔔" if new_val else "отключено 🔕"
         await callback.answer(f"Напоминание за 1 час: {status}", show_alert=True)
         updated = {**current, "notif_1h": new_val}
-        await callback.message.edit_reply_markup(reply_markup=_build_notif_keyboard(updated))
+        await callback.message.edit_reply_markup(reply_markup=NotificationKeyboard.settings(updated))
 
     # ═══════════════════════════════════════════════════════════════════════
     # АРХИВИРОВАНИЕ И ЧИСТКА

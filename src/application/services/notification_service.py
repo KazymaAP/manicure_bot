@@ -63,9 +63,13 @@ class NotificationService:
         self._blocked_users: set[int] = set()
 
     def _is_blocked_in_db(self, user_id: int) -> bool:
-        """FIXED BUG-4: проверяет флаг is_bot_blocked в БД users."""
+        """FIXED BUG-4: проверяет флаг is_bot_blocked в БД users.
+
+        ПРОБЛЕМА 12 FIX: используем публичное свойство .db из BaseRepository
+        вместо getattr(обхода инкапсуляции).
+        """
         try:
-            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
+            db = self._appointment_repo.db
             if db is None:
                 return False
             with db.read_connection() as conn:
@@ -79,9 +83,12 @@ class NotificationService:
         return False
 
     def _mark_blocked_in_db(self, user_id: int) -> None:
-        """FIXED BUG-4: записывает is_bot_blocked=1 в таблицу users."""
+        """FIXED BUG-4: записывает is_bot_blocked=1 в таблицу users.
+
+        ПРОБЛЕМА 12 FIX: используем публичное свойство .db из BaseRepository.
+        """
         try:
-            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
+            db = self._appointment_repo.db
             if db is None:
                 return
             with db.transaction() as conn:
@@ -97,9 +104,11 @@ class NotificationService:
         """FIXED BUG-4: загружает список заблокировавших пользователей из БД в кэш памяти.
 
         Вызывать при старте бота для восстановления кэша после перезапуска.
+
+        ПРОБЛЕМА 12 FIX: используем публичное свойство .db из BaseRepository.
         """
         try:
-            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
+            db = self._appointment_repo.db
             if db is None:
                 return
             with db.read_connection() as conn:

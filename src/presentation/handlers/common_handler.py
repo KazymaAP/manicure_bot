@@ -8,6 +8,7 @@ BUG 2.1 FIX: _check_subscription вынесена на уровень модул
 чтобы её можно было импортировать и использовать в user_handler.py.
 """
 
+import asyncio
 import contextlib
 import logging
 
@@ -71,8 +72,7 @@ def setup_common_router(container: Container) -> Router:
     @router.message(CommandStart())
     async def cmd_start(message: Message) -> None:
         """Тёплое приветствие с именем клиента и красивым главным меню."""
-        import asyncio
-
+        # ПРОБЛЕМА 3 FIX: import asyncio перенесён в начало файла вместе с другими импортами
         user_id = message.from_user.id
         is_subscribed = await _check_subscription(user_id, message.bot)
 
