@@ -15,6 +15,8 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     InlineQuery,
     InlineQueryResultArticle,
     InputTextMessageContent,
@@ -34,8 +36,6 @@ def setup_final_features_router(container: Container) -> Router:
 
     appt_service = container.appointment_service
     sched_service = container.schedule_service
-    notif_service = container.notification_service
-    settings = container.settings
     # FIXED БАГ-КРИТ-05: получаем db (DatabaseManager) из container вместо сырого sqlite3.connect()
     db = container.db
 
@@ -147,43 +147,21 @@ def setup_final_features_router(container: Container) -> Router:
             text = MessageFormatter.share_bot_link(bot_username)
             await message.answer(text)
         else:
-            await message.answer(MessageFormatter.error_general())
+            # Пункт 19: понятное сообщение вместо error_general
+            await message.answer("❌ Не удалось получить ссылку на бота. Попробуйте позже.")
 
     # ── #49 Управление уведомлениями ─────────────────────────────────────
     @router.message(F.text == "🔔 Уведомления")
     async def manage_notifications(message: Message) -> None:
         """FIXED BUG-09: фича #49 — управление уведомлениями и напоминаниями."""
 
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
         user_id = message.from_user.id
         # Получаем текущие настройки из БД
         notif_settings = await asyncio.to_thread(_get_user_notif_settings, user_id)
         all_on = notif_settings.get("notifications_enabled", 1)
-        h24 = notif_settings.get("notif_24h", 1)
-        h2 = notif_settings.get("notif_2h", 1)
-        h1 = notif_settings.get("notif_1h", 1)
-
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=f"{'✅' if all_on else '❌'} Все уведомления",
-                    callback_data="notif_all_on" if not all_on else "notif_all_off"
-                )],
-                [InlineKeyboardButton(
-                    text=f"{'🔔' if h24 else '🔕'} За 24 часа",
-                    callback_data="notif_24h"
-                )],
-                [InlineKeyboardButton(
-                    text=f"{'🔔' if h2 else '🔕'} За 2 часа",
-                    callback_data="notif_2h"
-                )],
-                [InlineKeyboardButton(
-                    text=f"{'🔔' if h1 else '🔕'} За 1 час",
-                    callback_data="notif_1h"
-                )],
-            ]
-        )
+        # Устранено дублирование (пункт 9): используем _build_notif_keyboard вместо
+        # inline-сборки идентичной клавиатуры
+        kb = _build_notif_keyboard(notif_settings)
         status_text = "включены ✅" if all_on else "отключены ❌"
         await message.answer(
             f"🔔 <b>Управление уведомлениями</b>\n\n"
@@ -221,7 +199,7 @@ def setup_final_features_router(container: Container) -> Router:
         на отдельные фиксированные запросы для каждой колонки.
         """
         # FIXED BUG-12: допустимые колонки — фиксированный белый список
-        _ALLOWED_COLS = {
+        _allowed_cols = {
             "notifications_enabled",
             "notif_24h",
             "notif_2h",
@@ -230,7 +208,7 @@ def setup_final_features_router(container: Container) -> Router:
         try:
             with db.transaction() as conn:
                 for col, val in kwargs.items():
-                    if col not in _ALLOWED_COLS:
+                    if col not in _allowed_cols:
                         logger.warning("_update_user_notif: unknown column %r, skipping", col)
                         continue
                     # FIXED BUG-12: используем фиксированные запросы вместо f-string с именем колонки
@@ -261,29 +239,27 @@ def setup_final_features_router(container: Container) -> Router:
         except Exception as exc:
             logger.error("Failed to update notification settings for user %s: %s", user_id, exc)
 
-    from aiogram.types import InlineKeyboardButton as _IKB, InlineKeyboardMarkup as _IKM
-
-    def _build_notif_keyboard(notif_settings: dict) -> _IKM:
+    def _build_notif_keyboard(notif_settings: dict) -> InlineKeyboardMarkup:
         """FIXED БАГ #17: строит актуальную клавиатуру настроек уведомлений."""
         all_on = notif_settings.get("notifications_enabled", 1)
         h24 = notif_settings.get("notif_24h", 1)
         h2 = notif_settings.get("notif_2h", 1)
         h1 = notif_settings.get("notif_1h", 1)
-        return _IKM(
+        return InlineKeyboardMarkup(
             inline_keyboard=[
-                [_IKB(
+                [InlineKeyboardButton(
                     text=f"{'✅' if all_on else '❌'} Все уведомления",
                     callback_data="notif_all_on" if not all_on else "notif_all_off"
                 )],
-                [_IKB(
+                [InlineKeyboardButton(
                     text=f"{'🔔' if h24 else '🔕'} За 24 часа",
                     callback_data="notif_24h"
                 )],
-                [_IKB(
+                [InlineKeyboardButton(
                     text=f"{'🔔' if h2 else '🔕'} За 2 часа",
                     callback_data="notif_2h"
                 )],
-                [_IKB(
+                [InlineKeyboardButton(
                     text=f"{'🔔' if h1 else '🔕'} За 1 час",
                     callback_data="notif_1h"
                 )],

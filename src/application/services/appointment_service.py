@@ -66,8 +66,11 @@ class AppointmentService:
         """
         # Path A: real repository with access to underlying DatabaseManager -> atomic transaction
         from src.infrastructure.database.connection import DatabaseManager
-        # FIXED HIGH-05: используем публичное свойство .db вместо getattr(_db)
-        db_obj = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
+        # Используем публичное свойство .db (пункт 14: устранён getattr-хак)
+        try:
+            db_obj = self._appointment_repo.db
+        except AttributeError:
+            db_obj = None
         if isinstance(db_obj, DatabaseManager):
             db = db_obj  # Используем один DatabaseManager для транзакции
             with db.transaction() as conn:
@@ -481,10 +484,8 @@ class AppointmentService:
     def get_blacklist(self) -> list[int]:
         """Возвращает список заблокированных user_id."""
         try:
-            # FIXED HIGH-05: используем публичное .db свойство
-            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
-            if db is None:
-                return []
+            # Используем публичное свойство .db (пункт 14: устранён getattr-хак)
+            db = self._appointment_repo.db
             with db.read_connection() as conn:
                 rows = conn.execute("SELECT user_id FROM blacklist").fetchall()
                 return [row[0] for row in rows]
@@ -506,10 +507,8 @@ class AppointmentService:
         Если колонка status недоступна — fallback в поле comment для обратной совместимости.
         """
         try:
-            db = getattr(self._appointment_repo, "db", None) or getattr(self._appointment_repo, "_db", None)
-            if db is None:
-                logger.warning("mark_completed: no DB reference found, skipping for appointment #%s", appointment_id)
-                return
+            # Используем публичное свойство .db (пункт 14: устранён getattr-хак)
+            db = self._appointment_repo.db
             with db.transaction() as conn:
                 # Проверяем наличие колонки status (добавлена в v4.1)
                 cols = [r[1] for r in conn.execute("PRAGMA table_info('appointments')").fetchall()]
@@ -541,3 +540,29 @@ class AppointmentService:
             )
 
     # cancel_by_id уже определён выше (строка 225)
+
+    def get_user_notification_settings(self, user_id: int) -> dict:
+        """Возвращает настройки уведомлений пользователя из таблицы users.
+
+        Устраняет дублирование (пункт 10): единственная реализация чтения
+        notifications_enabled, notif_24h, notif_2h, notif_1h из БД.
+        Используется как в final_features_handler.py, так и в reminder_service.py.
+
+        Returns:
+            Словарь с ключами notifications_enabled, notif_24h, notif_2h, notif_1h.
+            При ошибке возвращает значения по умолчанию (все включены).
+        """
+        defaults: dict = {"notifications_enabled": 1, "notif_24h": 1, "notif_2h": 1, "notif_1h": 1}
+        try:
+            db = self._appointment_repo.db
+            with db.read_connection() as conn:
+                row = conn.execute(
+                    "SELECT notifications_enabled, notif_24h, notif_2h, notif_1h "
+                    "FROM users WHERE user_id = ?",
+                    (user_id,)
+                ).fetchone()
+                if row:
+                    return dict(row)
+        except Exception as exc:
+            logger.warning("get_user_notification_settings: user_id=%s, error: %s", user_id, exc)
+        return defaults

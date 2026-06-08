@@ -13,7 +13,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     WebAppInfo,
 )
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 
 class MainMenuKeyboard:

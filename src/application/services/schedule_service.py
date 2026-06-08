@@ -375,16 +375,34 @@ class ScheduleService:
     def apply_template_to_date(self, template_id: int, date_str: str) -> int:
         """Применяет шаблон расписания к конкретной дате.
 
-        Парсит строку slots из шаблона (формат: "09:00, 10:00, 11:00"),
-        создаёт рабочий день и добавляет слоты.
-        Если день уже существует — добавляет слоты через add_time_slot.
-        Возвращает количество добавленных слотов.
+        Пункт 17: улучшенный парсинг шаблона — поддерживает диапазоны
+        вида "10:00-18:00" (генерирует все часовые слоты) и точные времена
+        вида "09:00, 10:00, 11:00". Возвращает количество добавленных слотов.
         """
+        from datetime import datetime
+        from datetime import timedelta as _td
+
         template = self.get_workday_template(template_id)
         if not template:
             raise ValueError(f"Template {template_id} not found")
         slots_str = template.get("slots", "")
-        slots = [s.strip() for s in slots_str.split(",") if s.strip()]
+
+        # Сначала пробуем парсить диапазоны вида "10:00-18:00"
+        ranges = re.findall(r'(\d{2}:\d{2})-(\d{2}:\d{2})', slots_str)
+        slots: list[str] = []
+        for start_s, end_s in ranges:
+            try:
+                current = datetime.strptime(start_s, "%H:%M")
+                end = datetime.strptime(end_s, "%H:%M")
+                while current <= end:
+                    slots.append(current.strftime("%H:%M"))
+                    current += _td(hours=1)
+            except ValueError:
+                pass
+
+        # Если диапазонов не найдено — берём точные времена через запятую
+        if not slots:
+            slots = [s.strip() for s in slots_str.split(",") if re.match(r'^\d{2}:\d{2}$', s.strip())]
 
         # Убедиться что рабочий день существует
         day = self._schedule_repo.get_working_day(date_str)

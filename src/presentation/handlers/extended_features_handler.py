@@ -18,7 +18,7 @@ from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, Message
 
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import AdminFSM, BookingFSM
@@ -392,7 +392,11 @@ def setup_extended_features_router(container: Container) -> Router:
             f"  {peak_hours_text or 'Нет данных'}\n"
         )
 
-        await callback.message.answer(text)
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        back_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад к фильтрам", callback_data="admin_back_main")]
+        ])
+        await callback.message.edit_text(text, reply_markup=back_kb, parse_mode="HTML")
         await callback.answer()
 
     # ── #12 Шаблоны расписания ────────────────────────────────────────────

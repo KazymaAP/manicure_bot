@@ -262,25 +262,12 @@ class ReminderService:
     def _get_user_notif_settings_from_db(self, user_id: int) -> dict:
         """Получает настройки уведомлений пользователя из БД.
 
-        FIXED БАГ-ВЫСОК-05: метод для проверки настроек уведомлений перед отправкой.
-        Используем appointment_service._appointment_repo._db (DatabaseManager) для доступа.
+        Устранение дублирования (пункт 10) + getattr-хак (пункт 14):
+        делегируем в AppointmentService.get_user_notification_settings(),
+        который является единственным источником правды для чтения notif-настроек.
         """
         try:
-            # FIXED HIGH-05: используем .db публичное свойство вместо getattr(_db)
-            repo = getattr(self._appointment_service, "_appointment_repo", None)
-            if repo is not None:
-                db = getattr(repo, "db", None) or getattr(repo, "_db", None)
-            else:
-                db = None
-            if db is None:
-                return {"notifications_enabled": 1}
-            with db.read_connection() as conn:
-                row = conn.execute(
-                    "SELECT notifications_enabled, notif_24h, notif_2h, notif_1h FROM users WHERE user_id = ?",
-                    (user_id,)
-                ).fetchone()
-                if row:
-                    return dict(row)
+            return self._appointment_service.get_user_notification_settings(user_id)
         except Exception as exc:
             logger.warning("Failed to get notification settings for user %s: %s", user_id, exc)
         return {"notifications_enabled": 1, "notif_24h": 1, "notif_2h": 1, "notif_1h": 1}

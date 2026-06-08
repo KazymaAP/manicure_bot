@@ -70,6 +70,15 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     def _is_admin(user_id: int) -> bool:
         return user_id in settings.admin_ids
 
+    def _is_valid_date(text: str) -> bool:
+        r"""Проверяет формат даты YYYY-MM-DD или YYYY.MM.DD.
+
+        Устраняет дублирование (пункт 8): три хендлера использовали идентичное
+        двойное re.match, первое из которых (r'^\d{4}[-.]\d{2}[-.]\d{2}$')
+        уже покрывает второй паттерн. Теперь используется единая функция.
+        """
+        return bool(re.match(r"^\d{4}[.\-]\d{2}[.\-]\d{2}$", text))
+
     # ── Хелпер для чтения config.json ────────────────────────────────────
     # BUG 2.2: используем _load_config_json из dependencies вместо дублирующей вложенной функции
     def _load_config() -> dict:
@@ -422,7 +431,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         date_str, time_str = parts[1], parts[2]
 
         try:
-            all_slots = await asyncio.to_thread(sched_service.get_all_slots, date_str)
+            all_slots = await sched_service.get_slots_for_date(date_str)
             slot = next((s for s in all_slots if s.time == time_str), None)
 
             if slot is None:
@@ -524,7 +533,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
         text = message.text.strip()
-        if not re.match(r"^\d{4}[-.]\d{2}[-.]\d{2}$", text) and not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        if not _is_valid_date(text):
             await message.answer(MessageFormatter.admin_invalid_date_format())
             return
         date_str = text.replace('.', '-')
@@ -547,7 +556,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
         text = message.text.strip()
-        if not re.match(r"^\d{4}[-.]\d{2}[-.]\d{2}$", text) and not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        if not _is_valid_date(text):
             await message.answer(MessageFormatter.admin_invalid_date_format())
             return
         date_str = text.replace('.', '-')
@@ -574,7 +583,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
 
         text = message.text.strip()
-        if not re.match(r"^\d{4}[-.]\d{2}[-.]\d{2}$", text) and not re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        if not _is_valid_date(text):
             await message.answer(MessageFormatter.admin_invalid_date_format())
             return
 
@@ -676,7 +685,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         _, date_str, time_str = callback.data.split(":", 2)
         try:
-            all_slots = await asyncio.to_thread(sched_service.get_all_slots, date_str)
+            all_slots = await sched_service.get_slots_for_date(date_str)
             booked_slot = next((s for s in all_slots if s.time == time_str and s.is_booked), None)
             if booked_slot:
                 await callback.answer(
@@ -974,55 +983,30 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     # BUG 2.3 FIX: отдельный хендлер для редактирования текста приветствия
     @router.message(AdminFSM.waiting_for_welcome_text, F.text)
     async def admin_welcome_text_save(message: Message, state: FSMContext) -> None:
-        """Сохраняет текст приветствия в config.json."""
+        """Сохраняет текст приветствия в config.json.
+
+        Дублирование устранено (пункт 7): вместо inline-блока сохранения
+        используется вспомогательная функция _save_config().
+        """
         if message.text.strip() == "❌ Отмена":
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
-        tmp_path = None
-        async with _config_write_lock:
-            config_path = os.path.normpath(
-                os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
+        try:
+            config = await asyncio.to_thread(_load_config)
+            if "bot" not in config:
+                config["bot"] = {}
+            config["bot"]["welcome"] = message.text
+            await _save_config(config)
+            await state.clear()
+            await message.answer(
+                "✅ Текст приветствия обновлён!\n\n<i>Изменения применены немедленно</i>",
+                reply_markup=AdminKeyboard.main_menu(),
+                parse_mode="HTML",
             )
-            try:
-                try:
-                    with open(config_path, encoding="utf-8") as f:
-                        config = json.load(f)
-                except FileNotFoundError:
-                    config = {}
-
-                if "bot" not in config:
-                    config["bot"] = {}
-                config["bot"]["welcome"] = message.text
-
-                config_dir = os.path.dirname(config_path)
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8",
-                    dir=config_dir, suffix=".tmp", delete=False,
-                ) as tmp_f:
-                    tmp_path = tmp_f.name
-                    json.dump(config, tmp_f, ensure_ascii=False, indent=2)
-
-                os.replace(tmp_path, config_path)
-                tmp_path = None
-
-                try:
-                    _load_config_json.cache_clear()
-                except Exception as exc:
-                    logger.debug("Suppressed cache_clear: %s", exc, exc_info=True)
-
-                await state.clear()
-                await message.answer(
-                    "✅ Текст приветствия обновлён!\n\n<i>Изменения применены немедленно</i>",
-                    reply_markup=AdminKeyboard.main_menu(),
-                    parse_mode="HTML",
-                )
-            except Exception as exc:
-                logger.error("Ошибка обновления config.json (welcome): %s", exc)
-                if tmp_path and os.path.exists(tmp_path):
-                    with contextlib.suppress(Exception):
-                        os.unlink(tmp_path)
-                await message.answer(MessageFormatter.error_general())
+        except Exception as exc:
+            logger.error("Ошибка обновления config.json (welcome): %s", exc)
+            await message.answer(MessageFormatter.error_general())
 
     # ── Фото приветствия ──────────────────────────────────────────────────
     # BUG 1.2 + BUG 2.3 FIX: используем отдельное состояние waiting_for_photo_url
@@ -1295,7 +1279,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer("❌ Услуги не настроены", show_alert=True)
             return
         buttons = []
-        for svc_name in services.keys():
+        for svc_name in services:
             buttons.append([InlineKeyboardButton(
                 text=f"✏️ {svc_name}",
                 callback_data=f"admin_edit_svc_select:{svc_name}"
@@ -1336,7 +1320,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer("❌ Услуги не настроены", show_alert=True)
             return
         buttons = []
-        for svc_name in services.keys():
+        for svc_name in services:
             buttons.append([InlineKeyboardButton(
                 text=f"🗑 {svc_name}",
                 callback_data=f"admin_del_svc_confirm:{svc_name}"
@@ -1773,10 +1757,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                     info = services.get(svc, {})
                     price = info.get("price") if isinstance(info, dict) else None
                     if price is not None:
-                        try:
+                        with contextlib.suppress(ValueError, TypeError):
                             total += int(price)
-                        except (ValueError, TypeError):
-                            pass
                 return total
 
             return {
@@ -1909,10 +1891,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     # ── Навигация: назад ──────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_back_main")
     async def admin_back_main(callback: CallbackQuery) -> None:
-        await callback.message.edit_text(
-            MessageFormatter.admin_welcome(),
-            reply_markup=None,
-        )
+        # Пункт 18: убрано двойное сообщение (edit_text + answer одного текста)
         await callback.message.answer(
             MessageFormatter.admin_welcome(),
             reply_markup=AdminKeyboard.main_menu(),
