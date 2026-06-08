@@ -176,6 +176,24 @@ class Settings(BaseSettings):
         description="[DEPRECATED] Webhook не реализован. Это поле игнорируется.",
     )
 
+    # BUG 3.5 FIX: валидатор для webhook_url — предупреждает если задано
+    @field_validator("webhook_url")
+    @classmethod
+    def warn_webhook_url(cls, v: str | None) -> str | None:
+        """BUG 3.5 FIX: предупреждает при установке webhook_url.
+
+        Бот работает только в polling-режиме. WEBHOOK_URL игнорируется в main.py.
+        """
+        if v is not None:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "⚠️ webhook_url='%s' задан в .env, но ИГНОРИРУЕТСЯ — "
+                "бот работает только в polling-режиме. "
+                "Webhook не поддерживается. Удалите WEBHOOK_URL из .env.",
+                v,
+            )
+        return v
+
     # ─── Временная зона (FIXED) ───────────────────────────────
     timezone: str = Field(
         default="UTC",

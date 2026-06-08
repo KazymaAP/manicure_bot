@@ -291,21 +291,10 @@ def setup_extended_features_router(container: Container) -> Router:
     # ═══════════════════════════════════════════════════════════════════════
 
     # ── #14 История посещений клиента ──────────────────────────────────────
-    # FIXED: убран фильтр AdminFSM.main_menu — хендлер никогда не срабатывал т.к. это состояние не активировалось
-    @router.callback_query(F.data == "admin_view_history")
-    async def admin_view_client_history(callback: CallbackQuery, state: FSMContext) -> None:
-        """Показывает историю посещений для введённого клиента.
-
-        FIXED: фича #14 — история посещений с полной статистикой.
-        FIXED БАГ-КРИТ-01: используем отдельное состояние waiting_for_history_query
-        вместо waiting_for_search_query, чтобы не конфликтовать с admin_find_client_query.
-        """
-        # FIXED БАГ-КРИТ-01: отдельное FSM-состояние для истории
-        await state.set_state(AdminFSM.waiting_for_history_query)
-        await callback.message.answer(
-            "🔍 Введите <b>имя</b> или <b>номер телефона</b> клиента для просмотра истории:"
-        )
-        await callback.answer()
+    # BUG 4.3 FIX: хендлер admin_view_history удалён как дублирующий мёртвый код.
+    # callback_data="admin_view_history" нет ни в одной клавиатуре.
+    # Корректный путь: admin_client_history (в admin_handler.py) → admin_search_client_history (ниже).
+    # Хендлер admin_search_client_history (waiting_for_history_query) сохранён.
 
     # FIXED БАГ-КРИТ-01: хендлер слушает waiting_for_history_query, а не waiting_for_search_query
     @router.message(AdminFSM.waiting_for_history_query)

@@ -89,6 +89,11 @@ addopts = [
     "--strict-markers",
     "-q",
 ]
+# BUG 5.3 FIX: подавляем предупреждения о неизвестных параметрах pytest
+filterwarnings = [
+    "ignore::pytest.PytestUnknownMarkWarning",
+    "ignore::DeprecationWarning",
+]
 markers = [
     "unit: unit tests (no DB or external services)",
     "integration: integration tests (require DB)",

@@ -26,7 +26,7 @@ from src.domain.exceptions.appointment import (
     SlotAlreadyBookedError,
 )
 from src.presentation.formatters.message_formatter import MessageFormatter
-from src.presentation.handlers.common_handler import _get_portfolio
+from src.presentation.handlers.common_handler import _get_portfolio, check_subscription
 from src.presentation.keyboards.booking import BookingKeyboard
 from src.presentation.keyboards.calendar import CalendarKeyboard
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
@@ -51,20 +51,16 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
         """Начинает процесс записи — показывает список услуг."""
         await state.clear()
 
-        # Проверка подписки
-        if settings.required_channel and message.from_user.id not in settings.admin_ids:
-            try:
-                member = await message.bot.get_chat_member(settings.required_channel, message.from_user.id)
-                status = getattr(member, "status", None)
-                if status in ("left", "kicked", "banned"):
-                    await message.answer(
-                        MessageFormatter.error_subscription_required(settings.required_channel),
-                        reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
-                        parse_mode="HTML",
-                    )
-                    return
-            except Exception:
-                pass
+        # BUG 2.1 FIX: используем общую функцию check_subscription из common_handler
+        # вместо дублирующей inline-логики
+        is_subscribed = await check_subscription(message.from_user.id, message.bot, settings)
+        if not is_subscribed:
+            await message.answer(
+                MessageFormatter.error_subscription_required(settings.required_channel),
+                reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
+                parse_mode="HTML",
+            )
+            return
 
         # Показываем выбор услуг
         await state.set_state(BookingFSM.choosing_service)
@@ -399,20 +395,15 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     async def my_appointments(message: Message) -> None:
         """Показывает список активных записей клиента."""
 
-        # Проверка подписки
-        if settings.required_channel and message.from_user.id not in settings.admin_ids:
-            try:
-                member = await message.bot.get_chat_member(settings.required_channel, message.from_user.id)
-                status = getattr(member, "status", None)
-                if status in ("left", "kicked", "banned"):
-                    await message.answer(
-                        MessageFormatter.error_subscription_required(settings.required_channel),
-                        reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
-                        parse_mode="HTML",
-                    )
-                    return
-            except Exception:
-                pass
+        # BUG 2.1 FIX: используем общую функцию check_subscription из common_handler
+        is_subscribed = await check_subscription(message.from_user.id, message.bot, settings)
+        if not is_subscribed:
+            await message.answer(
+                MessageFormatter.error_subscription_required(settings.required_channel),
+                reply_markup=MainMenuKeyboard.subscribe(settings.required_channel),
+                parse_mode="HTML",
+            )
+            return
 
         user_id = message.from_user.id
         appointments = await asyncio.to_thread(appt_service.get_user_appointments, user_id)

@@ -86,9 +86,9 @@ class AppointmentService:
                     blk_row = conn.execute("SELECT user_id FROM blacklist WHERE user_id = ?", (dto.user_id,)).fetchone()
                     if blk_row:
                         raise BlacklistedUserError(dto.user_id)
-                except sqlite3.OperationalError:
-                    # таблицы blacklist может не быть в старой схеме — игнорируем
-                    pass
+                except sqlite3.OperationalError as exc:
+                    # BUG 3.4 FIX: таблицы blacklist может не быть в старой схеме — логируем debug
+                    logger.debug("Suppressed: blacklist table missing: %s", exc, exc_info=True)
 
                 # 3) бронируем слот(ы) с учётом длительности услуги
                 duration = 0
@@ -96,7 +96,9 @@ class AppointmentService:
                     service = getattr(dto, "service", None)
                     if service is not None:
                         duration = int(self._service_durations.get(service, 0))
-                except Exception:
+                except Exception as exc:
+                    # BUG 3.4 FIX: логируем вместо молчаливого поглощения
+                    logger.debug("Suppressed: duration parse error: %s", exc, exc_info=True)
                     duration = 0
 
                 booked = self._schedule_repo.book_slots_with_conn(conn, dto.date, dto.time, duration)

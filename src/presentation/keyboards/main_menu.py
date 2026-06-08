@@ -23,7 +23,9 @@ class MainMenuKeyboard:
     def main(is_admin: bool = False, portfolio_url: str | None = None) -> ReplyKeyboardMarkup:
         """
         Главное меню клиента.
-        Основные 4 кнопки: Записаться, Мои записи, Цены, Связаться с мастером.
+
+        BUG 4.1 FIX: добавлены кнопки «📆 Расписание», «🔔 Уведомления» и «📤 Поделиться».
+        Хендлеры для них уже существовали в final_features_handler.py, но кнопок не было.
         """
         builder = ReplyKeyboardBuilder()
         # Первая строка — самые важные действия
@@ -35,6 +37,15 @@ class MainMenuKeyboard:
         builder.row(
             KeyboardButton(text="💰 Цены"),
             KeyboardButton(text="📞 Связаться с мастером")
+        )
+        # Третья строка — расписание и уведомления
+        builder.row(
+            KeyboardButton(text="📆 Расписание"),
+            KeyboardButton(text="🔔 Уведомления")
+        )
+        # Кнопка «Поделиться»
+        builder.row(
+            KeyboardButton(text="📤 Поделиться")
         )
         # Портфолио (если задано)
         if portfolio_url:

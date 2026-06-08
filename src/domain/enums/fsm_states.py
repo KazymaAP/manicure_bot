@@ -32,7 +32,8 @@ class BookingFSM(StatesGroup):
     # FIXED: добавлены состояния для переноса и waitlist
     transferring_choosing_date = State()
     transferring_choosing_time = State()
-    transferring_confirming = State()
+    # BUG 1.5 FIX: transferring_confirming удалено — мёртвый код, никогда не устанавливалось.
+    # Подтверждение переноса реализовано inline в transfer_confirm_new_slot.
 
 
 class AdminFSM(StatesGroup):
@@ -64,19 +65,18 @@ class AdminFSM(StatesGroup):
 
     # FIXED: дополнительные состояния для админ-фич
     waiting_for_broadcast = State()
-    waiting_for_export_range = State()
+    # BUG 3.1 FIX: waiting_for_export_range удалено — мёртвый код (никогда не устанавливалось)
     waiting_for_template_name = State()
     waiting_for_template_schedule = State()
     waiting_for_blacklist_id = State()
-    waiting_for_block_reason = State()
+    # BUG 3.1 FIX: waiting_for_block_reason удалено — мёртвый код
     waiting_for_search_query = State()
     # FIXED БАГ-КРИТ-01: отдельное состояние для истории посещений,
     # чтобы не конфликтовать с admin_find_client_query из admin_handler.py
     waiting_for_history_query = State()
-    confirming_cancel_all = State()
+    # BUG 3.1 FIX: confirming_cancel_all удалено — использовался confirming_cancel_all_date
     confirming_cancel_all_date = State()
-    # FIXED: добавлено отсутствующее состояние для разблокировки пользователя
-    waiting_for_unblock_user_id = State()
+    # BUG 3.1 FIX: waiting_for_unblock_user_id удалено — мёртвый код (используется waiting_for_blacklist_id)
 
     # FIXED BUG-3: новые состояния для редактирования настроек через бот
     waiting_for_edit_hours = State()        # редактирование рабочих часов

@@ -181,6 +181,27 @@ curl -H "Authorization: Bearer your_token" http://localhost:8080/metrics
 - **Infrastructure** — SQLite, HTTP, репозитории
 - **Presentation** — Telegram handlers, keyboards
 
+## Известные ограничения
+
+### Только polling-режим
+Бот работает исключительно в режиме **long polling**. **Webhook не поддерживается**.
+
+- Поля `WEBHOOK_URL` и `WEBHOOK_PORT` в `.env` присутствуют для обратной совместимости,
+  но **полностью игнорируются** при запуске.
+- Не устанавливайте `WEBHOOK_URL` в `.env` — бот всё равно запустится в polling.
+- Для production-деплоя используйте polling + supervisor/systemd/Docker.
+
+### SQLite
+Бот использует SQLite, что означает:
+- Только один процесс записи одновременно (WAL-режим смягчает это ограничение)
+- Не подходит для высоких нагрузок (>100 одновременных пользователей)
+- Для масштабирования потребуется переход на PostgreSQL
+
+### Напоминания
+- Напоминания хранятся в памяти (MemoryJobStore) если не задан `jobstore_url`
+- При перезапуске бота запланированные напоминания восстанавливаются автоматически
+  через `reminder_service.restore_reminders()` из таблицы активных записей
+
 ## Лицензия
 
 MIT

@@ -4,21 +4,44 @@ src/presentation/handlers/admin_handler.py — Административная 
 Обновлено: 6 разделов (Сегодня, Все записи, Расписание, Клиенты, Настройки, Чёрный список),
 кнопки «Пришла» и «Отменить», управление услугами через бот без правки кода,
 поиск клиентов, уведомление за 2 часа до первой записи.
+
+FIXED (новые исправления 2026-06-08):
+  - BUG 1.1: добавлены хендлеры admin_slot_info и admin_toggle_slot
+  - BUG 1.2: добавлен блок elif edit_mode == "photo" в admin_edit_setting_text
+  - BUG 1.3: двойное подтверждение — кнопки «❌ Отменить» переименованы в admin_cancel_request:ID,
+             добавлен хендлер admin_cancel_request_cb, показывающий диалог подтверждения
+  - BUG 2.2: _load_config() вынесена из вложенных функций и теперь использует _load_config_json из dependencies
+  - BUG 2.3: три отдельных FSM-состояния waiting_for_welcome_text / waiting_for_photo_url /
+             waiting_for_broadcast_text вместо перегруженного waiting_for_broadcast
+  - BUG 3.2: settings.reminder_hours_before обновляется через object.__setattr__ вместо __dict__
+  - BUG 3.3: все import перенесены в начало файла
+  - BUG 3.4: except Exception: pass → except Exception as exc: logger.debug/warning
+  - BUG 4.2: добавлена проверка прав в admin_client_history_cb
 """
 
 import asyncio
 import contextlib
+import csv
+import io
 import json
 import logging
 import os
 import re
+import tempfile
+from datetime import date, timedelta
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
-from src.config.dependencies import Container
+from src.config.dependencies import Container, _load_config_json
 from src.domain.enums.fsm_states import AdminFSM
 from src.domain.exceptions.appointment import (
     AppointmentAlreadyCancelledError,
@@ -47,6 +70,39 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     def _is_admin(user_id: int) -> bool:
         return user_id in settings.admin_ids
 
+    # ── Хелпер для чтения config.json ────────────────────────────────────
+    # BUG 2.2: используем _load_config_json из dependencies вместо дублирующей вложенной функции
+    def _load_config() -> dict:
+        """Загружает config.json используя кэшированную версию из dependencies."""
+        return dict(_load_config_json())
+
+    # ── Хелпер для атомарного сохранения config.json ─────────────────────
+    async def _save_config(config: dict) -> None:
+        """Атомарно сохраняет config.json и инвалидирует кэш."""
+        config_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
+        )
+        async with _config_write_lock:
+            config_dir = os.path.dirname(config_path)
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8",
+                    dir=config_dir, suffix=".tmp", delete=False,
+                ) as tmp_f:
+                    tmp_path = tmp_f.name
+                    json.dump(config, tmp_f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, config_path)
+                tmp_path = None
+                try:
+                    _load_config_json.cache_clear()
+                except Exception as exc:
+                    logger.debug("Suppressed cache_clear error: %s", exc, exc_info=True)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    with contextlib.suppress(Exception):
+                        os.unlink(tmp_path)
+
     # ── /admin — вход в панель ────────────────────────────────────────────
     @router.message(Command("admin"))
     async def cmd_admin(message: Message) -> None:
@@ -59,7 +115,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         try:
             if hasattr(sched_service, 'count_free_slots'):
                 free_slots = await asyncio.to_thread(sched_service.count_free_slots)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Suppressed: count_free_slots failed: %s", exc, exc_info=True)
             free_slots = 0
 
         text = MessageFormatter.admin_dashboard_summary(
@@ -99,12 +156,23 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         # Отправляем кнопки действий для каждой записи отдельно
         for appt in appointments:
             if not getattr(appt, 'is_cancelled', False):
+                # BUG 1.3: callback_data кнопки «Отменить» теперь admin_cancel_request:ID
+                # вместо admin_confirm_cancel:ID — показывает диалог подтверждения
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Пришла",
+                            callback_data=f"admin_arrived:{appt.id}"
+                        ),
+                        InlineKeyboardButton(
+                            text="❌ Отменить",
+                            callback_data=f"admin_cancel_request:{appt.id}"
+                        ),
+                    ]
+                ])
                 await message.answer(
                     f"🕐 <b>{appt.time}</b> — {appt.client_name}",
-                    reply_markup=AdminKeyboard.today_appointment_actions(
-                        appointment_id=appt.id,
-                        client_name=appt.client_name
-                    ),
+                    reply_markup=kb,
                     parse_mode="HTML",
                 )
 
@@ -118,8 +186,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         try:
             appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
             if appt:
-                # Пытаемся отметить как выполненную (если метод есть)
-                import contextlib
                 with contextlib.suppress(AttributeError):
                     await asyncio.to_thread(appt_service.mark_completed, appt_id)
                 await callback.message.edit_text(
@@ -181,7 +247,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 text += f"\n\n<i>Показано {page_size} из {total} записей.</i>"
             try:
                 await callback.message.edit_text(text, parse_mode="HTML")
-            except Exception:
+            except Exception as exc:
+                logger.debug("Suppressed edit_text error: %s", exc, exc_info=True)
                 short_text = MessageFormatter.admin_appointments_list(appointments[:10], filter_label)
                 await callback.message.edit_text(short_text, parse_mode="HTML")
         await callback.answer()
@@ -227,6 +294,34 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await state.set_state(AdminFSM.confirming_cancel)
 
+    # ── BUG 1.3: Новый хендлер — первый шаг запроса на отмену ────────────
+    @router.callback_query(F.data.startswith("admin_cancel_request:"))
+    async def admin_cancel_request_cb(callback: CallbackQuery, state: FSMContext) -> None:
+        """
+        BUG 1.3 FIX: Первый шаг — показываем диалог подтверждения.
+        Callback 'admin_cancel_request:ID' — срабатывает при нажатии «❌ Отменить»
+        из раздела «Сегодня» и «Клиенты».
+        Не отменяет запись немедленно — только показывает confirm_cancel keyboard.
+        """
+        if not _is_admin(callback.from_user.id):
+            await callback.answer("Нет прав администратора.", show_alert=True)
+            return
+        appt_id = int(callback.data.split(":")[1])
+        appt = await asyncio.to_thread(appt_service.get_appointment_by_id, appt_id)
+        if not appt:
+            await callback.answer("Запись не найдена.", show_alert=True)
+            return
+        await callback.message.edit_text(
+            f"⚠️ <b>Подтверждение отмены</b>\n\n"
+            f"Клиент: <b>{appt.client_name}</b>\n"
+            f"Дата: <b>{appt.date}</b>  Время: <b>{appt.time}</b>\n\n"
+            "Действительно отменить запись?",
+            reply_markup=AdminKeyboard.confirm_cancel(appt_id),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    # ── Финальная отмена по подтверждению ────────────────────────────────
     @router.callback_query(F.data.startswith("admin_confirm_cancel:"))
     async def admin_confirm_cancel(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
@@ -310,13 +405,84 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await callback.answer()
 
+    # ── BUG 1.1: Хендлер admin_slot_info — информация о слоте ───────────
+    @router.callback_query(F.data.startswith("admin_slot_info:"))
+    async def admin_slot_info(callback: CallbackQuery) -> None:
+        """
+        BUG 1.1 FIX: Показывает информацию о слоте (занят/свободен).
+        Для занятого — показывает имя и телефон клиента из appointments.
+        """
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        parts = callback.data.split(":", 2)
+        if len(parts) < 3:
+            await callback.answer("Некорректные данные слота.", show_alert=True)
+            return
+        date_str, time_str = parts[1], parts[2]
+
+        try:
+            all_slots = await asyncio.to_thread(sched_service.get_all_slots, date_str)
+            slot = next((s for s in all_slots if s.time == time_str), None)
+
+            if slot is None:
+                await callback.answer(f"Слот {time_str} не найден на {date_str}.", show_alert=True)
+                return
+
+            if slot.is_booked:
+                # Ищем запись в appointments
+                day_appts = await asyncio.to_thread(appt_service.get_appointments_by_date, date_str)
+                appt = next((a for a in day_appts if a.time == time_str and not getattr(a, 'is_cancelled', False)), None)
+                if appt:
+                    await callback.answer(
+                        f"📌 Занят: {appt.client_name}\n📞 {appt.phone}",
+                        show_alert=True,
+                    )
+                else:
+                    await callback.answer(f"📌 Слот {time_str} занят (клиент не найден).", show_alert=True)
+            else:
+                await callback.answer(f"🟢 Слот {time_str} на {date_str} свободен.", show_alert=True)
+        except Exception as exc:
+            logger.error("Ошибка admin_slot_info %s %s: %s", date_str, time_str, exc)
+            await callback.answer("Ошибка получения информации о слоте.", show_alert=True)
+
+    # ── BUG 1.1: Хендлер admin_toggle_slot — переключение слота ─────────
+    @router.callback_query(F.data.startswith("admin_toggle_slot:"))
+    async def admin_toggle_slot(callback: CallbackQuery) -> None:
+        """
+        BUG 1.1 FIX: Переключает статус свободного слота (открыт → закрыт).
+        Закрывает слот через sched_service.remove_slot(), т.к. слот гарантированно свободен
+        (для занятых callback_data="admin_noop").
+        """
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        parts = callback.data.split(":", 2)
+        if len(parts) < 3:
+            await callback.answer("Некорректные данные.", show_alert=True)
+            return
+        date_str, time_str = parts[1], parts[2]
+
+        try:
+            await sched_service.remove_slot(date_str, time_str)
+            await callback.answer(f"🔒 Слот {time_str} на {date_str} закрыт.", show_alert=True)
+            # Обновляем отображение дня
+            slots = await sched_service.get_slots_for_date(date_str)
+            await callback.message.edit_text(
+                MessageFormatter.admin_day_schedule(date_str, slots),
+                reply_markup=AdminKeyboard.day_slots(date_str, [s.time for s in slots]),
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.error("Ошибка admin_toggle_slot %s %s: %s", date_str, time_str, exc)
+            await callback.answer("Ошибка при закрытии слота.", show_alert=True)
+
     # ── Добавить слот (из меню) ────────────────────────────────────────────
     @router.callback_query(F.data == "admin_add_slot_manual")
     async def admin_add_slot_start_cb(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
-        # FIXED BUG-5: используем отдельное состояние waiting_for_slot_date
         await state.set_state(AdminFSM.waiting_for_slot_date)
         await callback.message.answer(
             MessageFormatter.admin_enter_date(),
@@ -329,7 +495,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     async def admin_add_slot_start(message: Message, state: FSMContext) -> None:
         if not _is_admin(message.from_user.id):
             return
-        # FIXED BUG-5: используем отдельное состояние waiting_for_slot_date
         await state.set_state(AdminFSM.waiting_for_slot_date)
         await message.answer(
             MessageFormatter.admin_enter_date(),
@@ -352,7 +517,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await callback.answer()
 
-    # FIXED BUG-5: отдельный хендлер для waiting_for_slot_date (добавление слота)
     @router.message(AdminFSM.waiting_for_slot_date, F.text)
     async def admin_add_slot_date_new(message: Message, state: FSMContext) -> None:
         if message.text.strip() == "❌ Отмена":
@@ -376,7 +540,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             parse_mode="HTML",
         )
 
-    # FIXED BUG-5: отдельный хендлер для waiting_for_toggle_date (открытие/закрытие дня)
     @router.message(AdminFSM.waiting_for_toggle_date, F.text)
     async def admin_toggle_day_date(message: Message, state: FSMContext) -> None:
         if message.text.strip() == "❌ Отмена":
@@ -403,8 +566,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         finally:
             await state.clear()
 
-    # waiting_for_date: обратная совместимость с extended_features_handler
-    # (apply_template_choose_date устанавливает это состояние)
     @router.message(AdminFSM.waiting_for_date, F.text)
     async def admin_add_slot_date(message: Message, state: FSMContext) -> None:
         if message.text.strip() == "❌ Отмена":
@@ -418,10 +579,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
 
         date_str = text.replace('.', '-')
-
         data = await state.get_data()
 
-        # БАГ #3: проверяем apply_template_id ПЕРЕД is_opening
         apply_template_id = data.get("apply_template_id")
         if apply_template_id is not None:
             try:
@@ -477,7 +636,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not re.match(r"^\d{2}:\d{2}$", time_str):
             await message.answer(MessageFormatter.admin_invalid_time_format())
             return
-        # FIXED HIGH-04: проверяем реальную корректность значений (regex пропускает 25:99)
         try:
             h, m = map(int, time_str.split(":"))
             if not (0 <= h < 24 and 0 <= m < 60):
@@ -544,7 +702,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         is_opening = message.text == "🗓 Открыть день"
         await state.update_data(is_opening=is_opening)
-        # FIXED BUG-5: используем отдельное состояние waiting_for_toggle_date
         await state.set_state(AdminFSM.waiting_for_toggle_date)
         await message.answer(
             MessageFormatter.admin_enter_date(),
@@ -558,7 +715,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer()
             return
         await state.update_data(is_opening=True)
-        # FIXED BUG-5: используем отдельное состояние waiting_for_toggle_date
         await state.set_state(AdminFSM.waiting_for_toggle_date)
         await callback.message.answer(
             MessageFormatter.admin_enter_date(),
@@ -573,7 +729,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer()
             return
         await state.update_data(is_opening=False)
-        # FIXED BUG-5: используем отдельное состояние waiting_for_toggle_date
         await state.set_state(AdminFSM.waiting_for_toggle_date)
         await callback.message.answer(
             MessageFormatter.admin_enter_date(),
@@ -616,7 +771,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await callback.answer()
             return
         try:
-            from datetime import date, timedelta
             today = date.today()
             opened = 0
             for i in range(1, 8):
@@ -688,15 +842,12 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await state.clear()
 
         try:
-            # FIXED BUG-11: используем SQL LIKE через search_appointments_by_client
-            # вместо загрузки всех записей в память
             found = await asyncio.to_thread(appt_service.search_appointments_by_client, query)
 
             if not found:
                 await message.answer(f"😔 Клиент по запросу «{query}» не найден.")
                 return
 
-            # Дедупликация по user_id — показываем последнюю запись
             seen_users = set()
             unique_found = []
             for a in sorted(found, key=lambda x: x.id or 0, reverse=True):
@@ -714,7 +865,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 reply_markup=AdminKeyboard.clients_menu() if len(unique_found) == 1 else None,
             )
 
-            # Кнопка «Написать» для одного результата
             if len(unique_found) == 1 and unique_found[0].user_id:
                 await message.answer(
                     "Написать этому клиенту:",
@@ -730,8 +880,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     # ── История клиента ────────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_client_history")
     async def admin_client_history_cb(callback: CallbackQuery, state: FSMContext) -> None:
+        # BUG 4.2 FIX: добавлена проверка прав администратора
         if not _is_admin(callback.from_user.id):
-            await callback.answer()
+            await callback.answer("Нет прав администратора.", show_alert=True)
             return
         await state.set_state(AdminFSM.waiting_for_history_query)
         await callback.message.answer(
@@ -740,30 +891,23 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await callback.answer()
 
-    # FIXED БАГ #5: Дублирующий хендлер admin_client_history_search удалён.
-    # Правильная реализация с SQL LIKE — в extended_features_handler.py (admin_search_client_history).
-
     # ════════════════════════════════════════════════════════════════════
     # РАЗДЕЛ 5: НАСТРОЙКИ
     # ════════════════════════════════════════════════════════════════════
 
     def _get_master_name() -> str:
-        """FIXED HIGH-02: читает имя мастера из config.json вместо хардкода.
-
-        Возвращает имя из config.json['master']['name'], иначе 'Мастер'.
-        """
+        """Читает имя мастера из config.json."""
         try:
-            from src.config.dependencies import _load_config_json
             config = _load_config_json()
             return config.get("master", {}).get("name", "Мастер")
-        except Exception:
+        except Exception as exc:
+            logger.debug("Suppressed: _get_master_name error: %s", exc, exc_info=True)
             return "Мастер"
 
     @router.message(F.text == "⚙️ Настройки")
     async def admin_settings(message: Message) -> None:
         if not _is_admin(message.from_user.id):
             return
-        # FIXED HIGH-02: имя мастера из config.json, не хардкод
         settings_dict = {
             "master_name": _get_master_name(),
             "welcome_text": settings.services and "настроен" or "по умолчанию",
@@ -784,7 +928,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
-        # FIXED HIGH-02: имя мастера из config.json, не хардкод
         settings_dict = {
             "master_name": _get_master_name(),
             "welcome_text": "настроен",
@@ -802,22 +945,23 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await callback.answer()
 
     # ── Редактирование приветствия ─────────────────────────────────────────
+    # BUG 2.3 FIX: теперь используем отдельное состояние waiting_for_welcome_text
     @router.callback_query(F.data == "admin_edit_welcome")
     async def admin_edit_welcome(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
-        # Читаем текущий текст из config.json
         config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
         try:
             with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
             current = config.get("bot", {}).get("welcome", "Текст не задан")
-        except Exception:
+        except Exception as exc:
+            logger.debug("Suppressed: read config for welcome: %s", exc, exc_info=True)
             current = "Текст не задан"
 
-        await state.set_state(AdminFSM.waiting_for_broadcast)  # Переиспользуем FSM
-        await state.update_data(edit_mode="welcome")
+        # BUG 2.3: используем waiting_for_welcome_text вместо waiting_for_broadcast
+        await state.set_state(AdminFSM.waiting_for_welcome_text)
         await callback.message.answer(
             f"Текущий текст приветствия:\n\n<i>{current[:200]}</i>\n\n"
             "Введите новый текст приветствия (поддерживается HTML):\n"
@@ -826,6 +970,120 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             parse_mode="HTML",
         )
         await callback.answer()
+
+    # BUG 2.3 FIX: отдельный хендлер для редактирования текста приветствия
+    @router.message(AdminFSM.waiting_for_welcome_text, F.text)
+    async def admin_welcome_text_save(message: Message, state: FSMContext) -> None:
+        """Сохраняет текст приветствия в config.json."""
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+        tmp_path = None
+        async with _config_write_lock:
+            config_path = os.path.normpath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
+            )
+            try:
+                try:
+                    with open(config_path, encoding="utf-8") as f:
+                        config = json.load(f)
+                except FileNotFoundError:
+                    config = {}
+
+                if "bot" not in config:
+                    config["bot"] = {}
+                config["bot"]["welcome"] = message.text
+
+                config_dir = os.path.dirname(config_path)
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8",
+                    dir=config_dir, suffix=".tmp", delete=False,
+                ) as tmp_f:
+                    tmp_path = tmp_f.name
+                    json.dump(config, tmp_f, ensure_ascii=False, indent=2)
+
+                os.replace(tmp_path, config_path)
+                tmp_path = None
+
+                try:
+                    _load_config_json.cache_clear()
+                except Exception as exc:
+                    logger.debug("Suppressed cache_clear: %s", exc, exc_info=True)
+
+                await state.clear()
+                await message.answer(
+                    "✅ Текст приветствия обновлён!\n\n<i>Изменения применены немедленно</i>",
+                    reply_markup=AdminKeyboard.main_menu(),
+                    parse_mode="HTML",
+                )
+            except Exception as exc:
+                logger.error("Ошибка обновления config.json (welcome): %s", exc)
+                if tmp_path and os.path.exists(tmp_path):
+                    with contextlib.suppress(Exception):
+                        os.unlink(tmp_path)
+                await message.answer(MessageFormatter.error_general())
+
+    # ── Фото приветствия ──────────────────────────────────────────────────
+    # BUG 1.2 + BUG 2.3 FIX: используем отдельное состояние waiting_for_photo_url
+    @router.callback_query(F.data == "admin_edit_photo")
+    async def admin_edit_photo(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin(callback.from_user.id):
+            await callback.answer()
+            return
+        # BUG 2.3: используем waiting_for_photo_url вместо waiting_for_broadcast
+        await state.set_state(AdminFSM.waiting_for_photo_url)
+        await callback.message.answer(
+            "📸 Отправьте URL фото для приветствия.\n\n"
+            "<i>Фото должно быть доступно по прямой ссылке (https://...)</i>",
+            reply_markup=AdminKeyboard.cancel(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+
+    # BUG 1.2 FIX: отдельный хендлер для сохранения URL фото
+    @router.message(AdminFSM.waiting_for_photo_url, F.text)
+    async def admin_photo_url_save(message: Message, state: FSMContext) -> None:
+        """
+        BUG 1.2 FIX: Сохраняет URL фото приветствия в config.json.
+        Ранее эта ветка отсутствовала и URL сохранялся как текст рассылки.
+        """
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
+            return
+
+        url = message.text.strip()
+        if not url.startswith("https://"):
+            await message.answer(
+                "❌ URL должен начинаться с <code>https://</code>\n\n"
+                "Пример: <code>https://example.com/photo.jpg</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        try:
+            config = await asyncio.to_thread(_load_config)
+            if "bot" not in config:
+                config["bot"] = {}
+            config["bot"]["welcome_photo_url"] = url
+            await _save_config(config)
+            # Обновляем settings в памяти
+            object.__setattr__(settings, "welcome_photo_url", url)
+        except Exception as exc:
+            logger.error("Ошибка сохранения фото приветствия: %s", exc)
+            await message.answer(MessageFormatter.error_general())
+            await state.clear()
+            return
+
+        await state.clear()
+        await message.answer(
+            f"✅ Фото приветствия обновлено!\n\n"
+            f"URL: <code>{url}</code>\n\n"
+            "<i>Изменения применены немедленно.</i>",
+            reply_markup=AdminKeyboard.main_menu(),
+            parse_mode="HTML",
+        )
 
     # ── Редактирование услуг ──────────────────────────────────────────────
     @router.callback_query(F.data == "admin_edit_services")
@@ -850,50 +1108,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await callback.answer()
 
     # ════════════════════════════════════════════════════════════════════
-    # FIXED BUG-3: ПОЛНЫЕ ХЕНДЛЕРЫ ДЛЯ НАСТРОЕК ЧЕРЕЗ БОТ
+    # ХЕНДЛЕРЫ ДЛЯ НАСТРОЕК ЧЕРЕЗ БОТ
     # ════════════════════════════════════════════════════════════════════
 
-    # ── Хелпер для атомарного сохранения config.json ─────────────────────
-    async def _save_config(config: dict) -> None:
-        """Атомарно сохраняет config.json и инвалидирует кэш."""
-        import tempfile
-        config_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
-        )
-        async with _config_write_lock:
-            config_dir = os.path.dirname(config_path)
-            tmp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8",
-                    dir=config_dir, suffix=".tmp", delete=False,
-                ) as tmp_f:
-                    tmp_path = tmp_f.name
-                    json.dump(config, tmp_f, ensure_ascii=False, indent=2)
-                os.replace(tmp_path, config_path)
-                tmp_path = None
-                try:
-                    from src.config.dependencies import _load_config_json
-                    _load_config_json.cache_clear()
-                except Exception:
-                    pass
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    with contextlib.suppress(Exception):
-                        os.unlink(tmp_path)
-
-    def _load_config() -> dict:
-        """Загружает config.json."""
-        config_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
-        )
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-    # ── Редактирование рабочих часов (FIXED BUG-3) ────────────────────────
+    # ── Редактирование рабочих часов ────────────────────────────────────
     @router.callback_query(F.data == "admin_edit_hours")
     async def admin_edit_hours(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
@@ -919,7 +1137,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
         text = message.text.strip()
-        # Парсим слоты
         raw_slots = [s.strip() for s in text.split(",") if s.strip()]
         valid_slots = []
         for slot in raw_slots:
@@ -940,7 +1157,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 config["schedule"] = {}
             config["schedule"]["default_time_slots"] = valid_slots
             await _save_config(config)
-            # Обновляем настройки в памяти
             settings.default_time_slots.clear()
             settings.default_time_slots.extend(valid_slots)
         except Exception as exc:
@@ -950,14 +1166,13 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         await state.clear()
         await message.answer(
-            f"✅ Рабочие часы обновлены!\n\n"
-            f"Слотов: <b>{len(valid_slots)}</b>: {', '.join(valid_slots)}\n\n"
+            f"✅ Рабочие часы обновлены!\n\nСлотов: <b>{len(valid_slots)}</b>: {', '.join(valid_slots)}\n\n"
             "<i>Изменения применены. Перезапуск не требуется.</i>",
             reply_markup=AdminKeyboard.main_menu(),
             parse_mode="HTML",
         )
 
-    # ── Редактирование интервала между записями (FIXED BUG-3) ─────────────
+    # ── Редактирование интервала ─────────────────────────────────────────
     @router.callback_query(F.data == "admin_edit_interval")
     async def admin_edit_interval(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
@@ -1003,7 +1218,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             parse_mode="HTML",
         )
 
-    # ── Редактирование времени напоминания (FIXED BUG-3) ──────────────────
+    # ── Редактирование времени напоминания ───────────────────────────────
     @router.callback_query(F.data == "admin_edit_reminder")
     async def admin_edit_reminder(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
@@ -1037,8 +1252,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 config["bot"] = {}
             config["bot"]["reminder_hours_before"] = hours
             await _save_config(config)
-            # Обновляем в памяти без перезапуска
-            settings.__dict__["reminder_hours_before"] = hours
+            # BUG 3.2 FIX: используем object.__setattr__ вместо settings.__dict__["..."]
+            object.__setattr__(settings, "reminder_hours_before", hours)
         except Exception as exc:
             logger.error("Ошибка сохранения напоминания: %s", exc)
             await message.answer(MessageFormatter.error_general())
@@ -1052,7 +1267,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             parse_mode="HTML",
         )
 
-    # ── Добавить услугу (FIXED BUG-3, BUG-16) ────────────────────────────
+    # ── Добавить услугу ──────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_add_service")
     async def admin_add_service_start(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
@@ -1069,7 +1284,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await callback.answer()
 
-    # ── Изменить услугу (FIXED BUG-3, BUG-16) ────────────────────────────
+    # ── Изменить услугу ──────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_edit_service")
     async def admin_edit_service_start(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
@@ -1079,8 +1294,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not services:
             await callback.answer("❌ Услуги не настроены", show_alert=True)
             return
-        # Показываем список услуг для выбора
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
         buttons = []
         for svc_name in services.keys():
             buttons.append([InlineKeyboardButton(
@@ -1112,7 +1325,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         )
         await callback.answer()
 
-    # ── Удалить услугу (FIXED BUG-3, BUG-16) ─────────────────────────────
+    # ── Удалить услугу ───────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_delete_service")
     async def admin_delete_service_start(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin(callback.from_user.id):
@@ -1122,7 +1335,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not services:
             await callback.answer("❌ Услуги не настроены", show_alert=True)
             return
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
         buttons = []
         for svc_name in services.keys():
             buttons.append([InlineKeyboardButton(
@@ -1151,7 +1363,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 del services_in_config[svc_name]
                 config["services"] = services_in_config
                 await _save_config(config)
-            # Обновляем в памяти
             if svc_name in settings.services:
                 del settings.services[svc_name]
             await callback.message.edit_text(
@@ -1185,8 +1396,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             svc_info = (settings.services or {}).get(old_name, {})
             old_price = f" (текущая: {svc_info.get('price', '?')} ₽)" if isinstance(svc_info, dict) else ""
         await message.answer(
-            f"💰 Введите <b>цену</b>{old_price} в рублях (только число):\n"
-            "<i>Например: 1500</i>",
+            f"💰 Введите <b>цену</b>{old_price} в рублях (только число):\n<i>Например: 1500</i>",
             reply_markup=AdminKeyboard.cancel(),
             parse_mode="HTML",
         )
@@ -1211,8 +1421,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             svc_info = (settings.services or {}).get(old_name, {})
             old_dur = f" (текущая: {svc_info.get('duration', '?')} мин)" if isinstance(svc_info, dict) else ""
         await message.answer(
-            f"⏱ Введите <b>длительность</b>{old_dur} в минутах:\n"
-            "<i>Например: 60</i>",
+            f"⏱ Введите <b>длительность</b>{old_dur} в минутах:\n<i>Например: 60</i>",
             reply_markup=AdminKeyboard.cancel(),
             parse_mode="HTML",
         )
@@ -1238,12 +1447,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             config = await asyncio.to_thread(_load_config)
             if "services" not in config:
                 config["services"] = {}
-            # Для редактирования — удаляем старое название, добавляем новое
             if action == "edit" and old_name and old_name != new_name:
                 config["services"].pop(old_name, None)
             config["services"][new_name] = {"price": price, "duration": duration}
             await _save_config(config)
-            # Обновляем settings в памяти без перезапуска
             if action == "edit" and old_name and old_name != new_name:
                 settings.services.pop(old_name, None)
             settings.services[new_name] = {"price": price, "duration": duration}
@@ -1253,7 +1460,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await state.clear()
             return
 
-        # Показываем актуальный прайс после изменения
         services = settings.services or {}
         price_text = "💅 <b>Актуальные услуги:</b>\n\n"
         for svc, info in services.items():
@@ -1263,18 +1469,15 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
         action_text = "добавлена" if action == "add" else "обновлена"
         await message.answer(
-            f"✅ Услуга «{new_name}» {action_text}!\n\n"
-            f"{price_text}\n"
-            "<i>Изменения применены немедленно.</i>",
+            f"✅ Услуга «{new_name}» {action_text}!\n\n{price_text}\n<i>Изменения применены немедленно.</i>",
             reply_markup=AdminKeyboard.main_menu(),
             parse_mode="HTML",
         )
         await state.clear()
 
-    # ── Написать клиенту (FIXED BUG-3) ────────────────────────────────────
+    # ── Написать клиенту ─────────────────────────────────────────────────
     @router.callback_query(F.data == "admin_message_client")
     async def admin_message_client_start(callback: CallbackQuery, state: FSMContext) -> None:
-        """Начинает процесс отправки сообщения конкретному клиенту."""
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
@@ -1290,7 +1493,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
     @router.message(AdminFSM.waiting_for_message_user_id, F.text)
     async def admin_message_client_get_id(message: Message, state: FSMContext) -> None:
-        """Получает Telegram ID клиента для отправки сообщения."""
         if message.text.strip() == "❌ Отмена":
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
@@ -1311,7 +1513,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
 
     @router.message(AdminFSM.waiting_for_message_client, F.text)
     async def admin_message_client_send(message: Message, state: FSMContext) -> None:
-        """Отправляет сообщение клиенту от имени администратора."""
         if message.text.strip() == "❌ Отмена":
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
@@ -1323,10 +1524,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer("❌ Ошибка: не найден ID получателя.", reply_markup=AdminKeyboard.main_menu())
             return
         try:
-            text_to_send = (
-                f"📩 <b>Сообщение от мастера:</b>\n\n"
-                f"{message.text}"
-            )
+            text_to_send = f"📩 <b>Сообщение от мастера:</b>\n\n{message.text}"
             await message.bot.send_message(target_user_id, text_to_send, parse_mode="HTML")
             await message.answer(
                 f"✅ Сообщение отправлено пользователю {target_user_id}.",
@@ -1340,79 +1538,15 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             )
         await state.clear()
 
-    # ── Обработчик текста при редактировании настроек ─────────────────────
-    @router.message(AdminFSM.waiting_for_broadcast, F.text)
-    async def admin_edit_setting_text(message: Message, state: FSMContext) -> None:
+    # ── BUG 2.3 FIX: Обработчик waiting_for_broadcast_text — только рассылка ─
+    @router.message(AdminFSM.waiting_for_broadcast_text, F.text)
+    async def admin_broadcast_text_input(message: Message, state: FSMContext) -> None:
+        """Принимает текст рассылки (отдельное состояние, не смешано с welcome/photo)."""
         if message.text.strip() == "❌ Отмена":
             await state.clear()
             await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
 
-        data = await state.get_data()
-        edit_mode = data.get("edit_mode")
-
-        if edit_mode == "welcome":
-            # FIXED HIGH-03: атомарная запись config.json:
-            # 1. asyncio.Lock защищает от concurrent записей (race condition)
-            # 2. Временный файл + os.replace() гарантирует атомарность (нет partial write)
-            # 3. Инвалидация кэша _load_config_json — изменения видны сразу
-            tmp_path = None
-            async with _config_write_lock:
-                config_path = os.path.normpath(
-                    os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
-                )
-                try:
-                    # Читаем текущий конфиг
-                    try:
-                        with open(config_path, encoding="utf-8") as f:
-                            config = json.load(f)
-                    except FileNotFoundError:
-                        config = {}
-
-                    if "bot" not in config:
-                        config["bot"] = {}
-                    config["bot"]["welcome"] = message.text
-
-                    # Атомарная запись: сначала во временный файл, потом os.replace()
-                    import tempfile
-                    config_dir = os.path.dirname(config_path)
-                    with tempfile.NamedTemporaryFile(
-                        mode="w",
-                        encoding="utf-8",
-                        dir=config_dir,
-                        suffix=".tmp",
-                        delete=False,
-                    ) as tmp_f:
-                        tmp_path = tmp_f.name
-                        json.dump(config, tmp_f, ensure_ascii=False, indent=2)
-
-                    os.replace(tmp_path, config_path)  # атомарная замена файла
-                    tmp_path = None  # файл перемещён, удалять не нужно
-
-                    # Инвалидируем кэш — изменения применяются без перезапуска
-                    try:
-                        from src.config.dependencies import _load_config_json
-                        _load_config_json.cache_clear()
-                    except Exception:
-                        pass
-
-                    await state.clear()
-                    await message.answer(
-                        "✅ Текст приветствия обновлён!\n\n"
-                        "<i>Изменения применены немедленно</i>",
-                        reply_markup=AdminKeyboard.main_menu(),
-                        parse_mode="HTML",
-                    )
-                except Exception as exc:
-                    logger.error("Ошибка обновления config.json: %s", exc)
-                    # Удаляем временный файл если он остался
-                    if tmp_path and os.path.exists(tmp_path):
-                        with contextlib.suppress(Exception):
-                            os.unlink(tmp_path)
-                    await message.answer(MessageFormatter.error_general())
-            return
-
-        # Обычная рассылка
         broadcast_text = message.text
         if len(broadcast_text) > 4000:
             await message.answer(
@@ -1427,21 +1561,78 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             reply_markup=AdminKeyboard.broadcast_confirm(broadcast_text)
         )
 
-    # ── Фото приветствия ──────────────────────────────────────────────────
-    @router.callback_query(F.data == "admin_edit_photo")
-    async def admin_edit_photo(callback: CallbackQuery, state: FSMContext) -> None:
-        if not _is_admin(callback.from_user.id):
-            await callback.answer()
+    # ── Обратная совместимость: waiting_for_broadcast — по-прежнему работает ─
+    # Оставляем для внешнего совместимого кода, но edit_mode логика разделена
+    @router.message(AdminFSM.waiting_for_broadcast, F.text)
+    async def admin_edit_setting_text(message: Message, state: FSMContext) -> None:
+        """Обработчик waiting_for_broadcast — только для совместимости.
+
+        BUG 1.2 FIX: добавлен блок elif edit_mode == 'photo' для сохранения URL.
+        BUG 2.3 FIX: новые вызовы должны использовать отдельные состояния
+        (waiting_for_welcome_text, waiting_for_photo_url, waiting_for_broadcast_text).
+        Этот хендлер остаётся для обратной совместимости.
+        """
+        if message.text.strip() == "❌ Отмена":
+            await state.clear()
+            await message.answer(MessageFormatter.operation_cancelled(), reply_markup=AdminKeyboard.main_menu())
             return
-        await state.set_state(AdminFSM.waiting_for_broadcast)
-        await state.update_data(edit_mode="photo")
-        await callback.message.answer(
-            "📸 Отправьте URL фото для приветствия.\n\n"
-            "<i>Фото должно быть доступно по прямой ссылке (https://...)</i>",
-            reply_markup=AdminKeyboard.cancel(),
+
+        data = await state.get_data()
+        edit_mode = data.get("edit_mode")
+
+        if edit_mode == "welcome":
+            # Перенаправляем в отдельный хендлер через смену состояния
+            await state.set_state(AdminFSM.waiting_for_welcome_text)
+            await admin_welcome_text_save(message, state)
+            return
+
+        elif edit_mode == "photo":
+            # BUG 1.2 FIX: обрабатываем URL фото приветствия
+            url = message.text.strip()
+            if not url.startswith("https://"):
+                await message.answer(
+                    "❌ URL должен начинаться с <code>https://</code>\n\n"
+                    "Пример: <code>https://example.com/photo.jpg</code>",
+                    parse_mode="HTML",
+                )
+                return
+            try:
+                config = await asyncio.to_thread(_load_config)
+                if "bot" not in config:
+                    config["bot"] = {}
+                config["bot"]["welcome_photo_url"] = url
+                await _save_config(config)
+                # BUG 3.2 FIX: object.__setattr__ вместо __dict__
+                object.__setattr__(settings, "welcome_photo_url", url)
+            except Exception as exc:
+                logger.error("Ошибка сохранения фото приветствия (compat): %s", exc)
+                await message.answer(MessageFormatter.error_general())
+                await state.clear()
+                return
+            await state.clear()
+            await message.answer(
+                f"✅ Фото приветствия обновлено!\n\n"
+                f"URL: <code>{url}</code>\n\n"
+                "<i>Изменения применены немедленно.</i>",
+                reply_markup=AdminKeyboard.main_menu(),
+                parse_mode="HTML",
+            )
+            return
+
+        # Обычная рассылка (edit_mode == "broadcast" или не задан)
+        broadcast_text = message.text
+        if len(broadcast_text) > 4000:
+            await message.answer(
+                f"⚠️ Текст слишком длинный ({len(broadcast_text)} символов). Максимум 4000."
+            )
+            return
+        await state.update_data(broadcast_text=broadcast_text)
+        await message.answer("Предпросмотр рассылки:", parse_mode="HTML")
+        await message.answer(
+            broadcast_text,
             parse_mode="HTML",
+            reply_markup=AdminKeyboard.broadcast_confirm(broadcast_text)
         )
-        await callback.answer()
 
     # ════════════════════════════════════════════════════════════════════
     # РАЗДЕЛ 6: ЧЁРНЫЙ СПИСОК
@@ -1454,13 +1645,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         try:
             blacklisted = await asyncio.to_thread(appt_service.get_blacklist)
             text = MessageFormatter.blacklist_info(blacklisted)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Suppressed: get_blacklist error: %s", exc, exc_info=True)
             text = "🚫 <b>Чёрный список</b>\n\nОшибка получения списка."
-        await message.answer(
-            text,
-            reply_markup=AdminKeyboard.blacklist_menu(),
-            parse_mode="HTML",
-        )
+        await message.answer(text, reply_markup=AdminKeyboard.blacklist_menu(), parse_mode="HTML")
 
     @router.callback_query(F.data == "admin_show_blacklist")
     async def admin_show_blacklist(callback: CallbackQuery) -> None:
@@ -1470,13 +1658,10 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         try:
             blacklisted = await asyncio.to_thread(appt_service.get_blacklist)
             text = MessageFormatter.blacklist_info(blacklisted)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Suppressed: get_blacklist error: %s", exc, exc_info=True)
             text = "🚫 <b>Чёрный список</b>\n\nСписок пуст или ошибка."
-        await callback.message.edit_text(
-            text,
-            reply_markup=AdminKeyboard.blacklist_menu(),
-            parse_mode="HTML",
-        )
+        await callback.message.edit_text(text, reply_markup=AdminKeyboard.blacklist_menu(), parse_mode="HTML")
         await callback.answer()
 
     @router.callback_query(F.data == "admin_block_user")
@@ -1519,27 +1704,19 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         action = data.get("blacklist_action", "block")
         text = message.text.strip()
 
-        # Если введён числовой ID
         if text.isdigit():
             user_id = int(text)
             try:
                 if action == "block":
                     await asyncio.to_thread(appt_service.add_to_blacklist, user_id)
-                    await message.answer(
-                        MessageFormatter.blacklist_user_added(user_id),
-                        reply_markup=AdminKeyboard.main_menu(),
-                    )
+                    await message.answer(MessageFormatter.blacklist_user_added(user_id), reply_markup=AdminKeyboard.main_menu())
                 else:
                     await asyncio.to_thread(appt_service.remove_from_blacklist, user_id)
-                    await message.answer(
-                        MessageFormatter.blacklist_user_removed(user_id),
-                        reply_markup=AdminKeyboard.main_menu(),
-                    )
+                    await message.answer(MessageFormatter.blacklist_user_removed(user_id), reply_markup=AdminKeyboard.main_menu())
             except Exception as exc:
                 logger.error("Ошибка изменения черного списка: %s", exc)
                 await message.answer(f"❌ Ошибка: {exc}")
         else:
-            # Поиск по имени
             await message.answer(
                 "⚠️ Введите числовой Telegram ID пользователя."
                 "\n\nЧтобы найти ID — используйте раздел «👥 Клиенты» → «Найти клиента»."
@@ -1557,7 +1734,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         try:
             stats = await asyncio.to_thread(appt_service.get_statistics)
-            # FIXED BUG-15: вычисляем выручку на основе записей и цен из settings.services
             revenue = await asyncio.to_thread(_calc_revenue)
             await message.answer(
                 MessageFormatter.admin_stats(
@@ -1577,8 +1753,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             await message.answer(MessageFormatter.error_general())
 
     def _calc_revenue() -> dict:
-        """FIXED BUG-15: вычисляет выручку на основе записей и prices из settings.services."""
-        from datetime import date, timedelta
+        """Вычисляет выручку на основе записей и prices из settings.services."""
         try:
             today_str = date.today().isoformat()
             week_start = (date.today() - timedelta(days=7)).isoformat()
@@ -1617,26 +1792,19 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
     async def admin_broadcast_start(message: Message, state: FSMContext) -> None:
         if not _is_admin(message.from_user.id):
             return
-        await state.set_state(AdminFSM.waiting_for_broadcast)
-        await state.update_data(edit_mode="broadcast")
+        # BUG 2.3 FIX: используем waiting_for_broadcast_text вместо waiting_for_broadcast
+        await state.set_state(AdminFSM.waiting_for_broadcast_text)
         await message.answer(
             "📢 Введите текст рассылки (поддерживается HTML):",
             reply_markup=AdminKeyboard.cancel(),
             parse_mode="HTML",
         )
 
-    # FIXED CRIT-05: хранилище активных задач рассылки для предотвращения сборки GC
     _broadcast_tasks: set = set()
 
     @router.callback_query(F.data == "admin_broadcast_send")
     async def admin_broadcast_send(callback: CallbackQuery, state: FSMContext) -> None:
-        """FIXED CRIT-05: рассылка запускается как фоновая задача (asyncio.create_task).
-
-        Это предотвращает блокировку event loop на 50+ секунд при 1000+ пользователях.
-        Задержка увеличена с 0.05с до 0.04с (соответствует лимиту Telegram ~25 msg/sec с запасом).
-        Ссылка на задачу сохраняется в _broadcast_tasks для предотвращения преждевременной
-        сборки мусора.
-        """
+        """Рассылка запускается как фоновая задача (asyncio.create_task)."""
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
@@ -1649,11 +1817,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await state.clear()
 
         async def _do_broadcast() -> None:
-            """Выполняет рассылку в фоне, не блокируя event loop."""
             try:
-                all_user_ids: set[int] = set()
+                all_user_ids: set = set()
                 try:
-                    # FIXED HIGH-05: используем публичное .db свойство контейнера
                     db = getattr(container, "db", None) or getattr(container, "_db", None)
                     if db is not None:
                         def _get_all_users():
@@ -1661,8 +1827,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                                 rows = conn.execute("SELECT user_id FROM users").fetchall()
                                 return {row[0] for row in rows}
                         all_user_ids = await asyncio.to_thread(_get_all_users)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed: get users for broadcast: %s", exc, exc_info=True)
 
                 if not all_user_ids:
                     appts = await asyncio.to_thread(appt_service.get_all_active)
@@ -1674,7 +1840,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                     try:
                         await callback.message.bot.send_message(uid, text, parse_mode="HTML")
                         sent += 1
-                        # FIXED CRIT-05: задержка 0.04с ≈ 25 msg/sec (лимит Telegram 30/sec с запасом)
                         await asyncio.sleep(0.04)
                     except Exception:
                         failed += 1
@@ -1688,9 +1853,7 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                 with contextlib.suppress(Exception):
                     await callback.message.answer(MessageFormatter.error_general())
 
-        # FIXED CRIT-05: запускаем как asyncio.create_task() — не блокируем event loop
         task = asyncio.create_task(_do_broadcast())
-        # Сохраняем ссылку на задачу в _broadcast_tasks чтобы GC не удалил её раньше завершения
         _broadcast_tasks.add(task)
         task.add_done_callback(_broadcast_tasks.discard)
 
@@ -1722,8 +1885,6 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             return
         try:
             appointments = await asyncio.to_thread(appt_service.get_appointments_filtered, "all")
-            import csv
-            import io
             output = io.StringIO()
             writer = csv.writer(output)
             writer.writerow(["ID", "Дата", "Время", "Клиент", "Телефон", "Услуга", "Комментарий", "Статус"])
@@ -1838,18 +1999,12 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
                     await asyncio.to_thread(appt_service.admin_cancel_appointment, appt.id)
                     await notif_service.notify_client_cancellation_by_admin(appt.user_id, appt.date, appt.time)
                     cancelled += 1
-                except Exception:
-                    pass
-            await callback.message.edit_text(
-                f"✅ Отменено {cancelled} записей на {date_str}.",
-                reply_markup=None,
-            )
+                except Exception as exc:
+                    logger.debug("Suppressed: cancel appt %s: %s", appt.id, exc, exc_info=True)
+            await callback.message.edit_text(f"✅ Отменено {cancelled} записей на {date_str}.", reply_markup=None)
         except Exception as exc:
             logger.error("Ошибка массовой отмены: %s", exc)
             await callback.message.edit_text(MessageFormatter.error_general())
         await callback.answer()
-
-    # NOTE: admin_monthly_stats handler removed from here — the more complete version
-    # (with weekday breakdown and peak hours analysis) lives in extended_features_handler.py
 
     return router

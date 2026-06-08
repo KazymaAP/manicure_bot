@@ -57,7 +57,11 @@ class AdminKeyboard:
     # ── Записи на сегодня — кнопки «Пришла» и «Отменить» ─────────────────
     @staticmethod
     def today_appointment_actions(appointment_id: int, client_name: str) -> InlineKeyboardMarkup:
-        """Кнопки действий для записи на сегодня."""
+        """Кнопки действий для записи на сегодня.
+
+        BUG 1.3 FIX: кнопка «Отменить» теперь admin_cancel_request:ID
+        (показывает диалог подтверждения), а не admin_confirm_cancel:ID (немедленная отмена).
+        """
         builder = InlineKeyboardBuilder()
         builder.row(
             InlineKeyboardButton(
@@ -66,14 +70,17 @@ class AdminKeyboard:
             ),
             InlineKeyboardButton(
                 text="❌ Отменить",
-                callback_data=f"admin_confirm_cancel:{appointment_id}"
+                callback_data=f"admin_cancel_request:{appointment_id}"
             ),
         )
         return builder.as_markup()
 
     @staticmethod
     def today_appointments_list(appointments: list) -> InlineKeyboardMarkup:
-        """Список записей на сегодня с кнопками действий."""
+        """Список записей на сегодня с кнопками действий.
+
+        BUG 1.3 FIX: кнопка «Отменить» теперь admin_cancel_request:ID.
+        """
         builder = InlineKeyboardBuilder()
         for appt in appointments:
             appt_id = appt.id if appt.id is not None else 0
@@ -86,7 +93,7 @@ class AdminKeyboard:
             builder.row(
                 InlineKeyboardButton(
                     text=f"❌ {appt.time} {appt.client_name} — Отменить",
-                    callback_data=f"admin_confirm_cancel:{appt_id}"
+                    callback_data=f"admin_cancel_request:{appt_id}"
                 ),
             )
         return builder.as_markup()
@@ -127,6 +134,10 @@ class AdminKeyboard:
         )
         builder.row(
             InlineKeyboardButton(text="🚫 Массовая отмена", callback_data="admin_cancel_all_date_cb"),
+        )
+        # BUG 4.4 FIX: кнопка шаблонов теперь доступна из меню расписания
+        builder.row(
+            InlineKeyboardButton(text="📋 Шаблоны расписания", callback_data="admin_templates"),
         )
         builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_main"))
         return builder.as_markup()
@@ -244,7 +255,10 @@ class AdminKeyboard:
 
     @staticmethod
     def client_actions(user_id: int, appt_id: int) -> InlineKeyboardMarkup:
-        """Действия с клиентом."""
+        """Действия с клиентом.
+
+        BUG 1.3 FIX: кнопка «Отменить запись» теперь admin_cancel_request:ID.
+        """
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(
             text="✉️ Написать клиенту",
@@ -253,7 +267,7 @@ class AdminKeyboard:
         builder.row(
             InlineKeyboardButton(
                 text="❌ Отменить запись",
-                callback_data=f"admin_confirm_cancel:{appt_id}"
+                callback_data=f"admin_cancel_request:{appt_id}"
             )
         )
         builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_clients"))

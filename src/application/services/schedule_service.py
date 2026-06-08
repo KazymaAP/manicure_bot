@@ -400,8 +400,9 @@ class ScheduleService:
             try:
                 if self._schedule_repo.add_time_slot(date_str, slot_time):
                     added += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                # BUG 3.4 FIX: логируем вместо молчаливого поглощения ошибки
+                logger.warning("Failed to add slot %s on %s: %s", slot_time, date_str, exc)
         return added
 
     def count_free_slots(self) -> int:

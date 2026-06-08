@@ -3,6 +3,9 @@ src/presentation/handlers/common_handler.py — Общие обработчик�
 
 Обновлено: тёплое приветствие с именем мастера, цены-карточки,
 контактная информация, кнопка «Связаться с мастером».
+
+BUG 2.1 FIX: _check_subscription вынесена на уровень модуля с параметром settings,
+чтобы её можно было импортировать и использовать в user_handler.py.
 """
 
 import contextlib
@@ -25,6 +28,33 @@ def _get_portfolio(settings) -> str | None:
     return settings.portfolio_url
 
 
+async def check_subscription(user_id: int, bot, settings) -> bool:
+    """
+    BUG 2.1 FIX: Проверяет подписку пользователя на канал.
+    Вынесена на уровень модуля для переиспользования в user_handler.py.
+    Ранее эта логика дублировалась inline в start_booking и my_appointments.
+    """
+    if not settings.required_channel:
+        return True
+    try:
+        if user_id in settings.admin_ids:
+            return True
+    except Exception:
+        pass
+    try:
+        member = await bot.get_chat_member(settings.required_channel, user_id)
+        status = getattr(member, "status", None)
+        if status in ("left", "kicked", "banned"):
+            return False
+        is_member_flag = getattr(member, "is_member", None)
+        if is_member_flag is not None:
+            return bool(is_member_flag)
+        return True
+    except Exception as exc:
+        logger.warning("Ошибка проверки подписки для %s: %s", user_id, exc)
+        return True
+
+
 router = Router(name="common")
 
 
@@ -34,26 +64,8 @@ def setup_common_router(container: Container) -> Router:
     settings = container.settings
 
     async def _check_subscription(user_id: int, bot) -> bool:
-        """Проверяет подписку пользователя на канал."""
-        if not settings.required_channel:
-            return True
-        try:
-            if user_id in settings.admin_ids:
-                return True
-        except Exception:
-            pass
-        try:
-            member = await bot.get_chat_member(settings.required_channel, user_id)
-            status = getattr(member, "status", None)
-            if status in ("left", "kicked", "banned"):
-                return False
-            is_member_flag = getattr(member, "is_member", None)
-            if is_member_flag is not None:
-                return bool(is_member_flag)
-            return True
-        except Exception as exc:
-            logger.warning("Ошибка проверки подписки для %s: %s", user_id, exc)
-            return True
+        """Внутренняя обёртка над check_subscription с захваченным settings."""
+        return await check_subscription(user_id, bot, settings)
 
     # ── /start — приветственное сообщение ────────────────────────────────
     @router.message(CommandStart())

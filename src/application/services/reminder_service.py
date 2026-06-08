@@ -249,6 +249,16 @@ class ReminderService:
 
         await self._notification_service.send_reminder(user_id, time_str, appointment_id)
 
+        # BUG 4.5 FIX: отмечаем напоминание как отправленное после успешной отправки
+        try:
+            await asyncio.to_thread(self._appointment_service.mark_reminder_sent, appointment_id)
+            logger.debug("Reminder marked as sent for appointment #%s", appointment_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to mark reminder sent for appointment #%s: %s",
+                appointment_id, exc
+            )
+
     def _get_user_notif_settings_from_db(self, user_id: int) -> dict:
         """Получает настройки уведомлений пользователя из БД.
 

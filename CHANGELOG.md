@@ -4,6 +4,104 @@ All notable changes to this project will be documented in this file.
 
 Format: [Semantic Versioning](https://semver.org/)
 
+## [4.4.0] — 2026-06-08 (Complete Audit Fix)
+
+### Fixed — БЛОК 1: Критические баги
+
+- **BUG 1.1** (`admin_handler.py`): Добавлены хендлеры `admin_slot_info` и `admin_toggle_slot`.
+  Ранее нажатие на слот в разделе «Расписание» ничего не делало — хендлеры отсутствовали.
+  `admin_slot_info` показывает статус слота (занят/свободен) и данные клиента если занят.
+  `admin_toggle_slot` закрывает свободный слот через `sched_service.remove_slot()`.
+
+- **BUG 1.2** (`admin_handler.py`): Добавлен отдельный хендлер `admin_photo_url_save`
+  для состояния `waiting_for_photo_url`. Ранее URL фото сохранялся как текст рассылки
+  и рассылался всем пользователям. Теперь URL валидируется (должен начинаться с `https://`)
+  и сохраняется в `config.json["bot"]["welcome_photo_url"]`.
+
+- **BUG 1.3** (`admin_handler.py`, `admin.py`): Разделена логика отмены на два шага.
+  Кнопки «❌ Отменить» в разделах «Сегодня» и «Клиенты» теперь генерируют
+  `callback_data="admin_cancel_request:{id}"` → новый хендлер показывает диалог подтверждения.
+  Хендлер `admin_confirm_cancel` остаётся финальным шагом отмены.
+
+- **BUG 1.4** (`Makefile`, `pyproject.toml`): Создан `Makefile` с целями `test`, `lint`,
+  `format`, `run`. `make test` сначала устанавливает зависимости, потом запускает pytest.
+  В `pyproject.toml` добавлен `filterwarnings` для подавления предупреждений pytest.
+
+- **BUG 1.5** (`fsm_states.py`): Удалено мёртвое состояние `BookingFSM.transferring_confirming`
+  — никогда не устанавливалось через `state.set_state()`. Подтверждение переноса
+  выполняется inline в `transfer_confirm_new_slot`.
+
+### Fixed — БЛОК 2: Дублирование кода
+
+- **BUG 2.1** (`common_handler.py`, `user_handler.py`): Функция `_check_subscription`
+  вынесена на уровень модуля как `check_subscription(user_id, bot, settings)`.
+  В `user_handler.py` обе inline-проверки подписки заменены вызовами `check_subscription`.
+
+- **BUG 2.2** (`admin_handler.py`, `config_writer.py`): Вложенная функция `_load_config()`
+  заменена вызовом `_load_config_json` из `src/config/dependencies.py`.
+  Создан `src/config/config_writer.py` с `save_config()` для переиспользования.
+
+- **BUG 2.3** (`admin_handler.py`, `fsm_states.py`): Три отдельных хендлера вместо
+  перегруженного `waiting_for_broadcast`: `waiting_for_welcome_text` → приветствие,
+  `waiting_for_photo_url` → фото, `waiting_for_broadcast_text` → рассылка.
+
+### Fixed — БЛОК 3: Безопасность и качество
+
+- **BUG 3.1** (`fsm_states.py`): Удалены мёртвые FSM-состояния AdminFSM:
+  `waiting_for_export_range`, `waiting_for_block_reason`, `confirming_cancel_all`,
+  `waiting_for_unblock_user_id`, `BookingFSM.transferring_confirming`.
+  Активные состояния `waiting_for_welcome_text`, `waiting_for_photo_url`,
+  `waiting_for_broadcast_text` теперь используются.
+
+- **BUG 3.2** (`admin_handler.py`): `settings.__dict__["reminder_hours_before"] = hours`
+  заменён на `object.__setattr__(settings, "reminder_hours_before", hours)`.
+
+- **BUG 3.3** (`admin_handler.py`): Все `import` перенесены в начало файла:
+  `csv`, `io`, `tempfile`, `date`, `timedelta`, `InlineKeyboardButton`, `InlineKeyboardMarkup`.
+
+- **BUG 3.4** (`admin_handler.py`, `schedule_service.py`, `appointment_service.py`):
+  `except Exception: pass` заменены на `except Exception as exc: logger.debug/warning(...)`.
+
+- **BUG 3.5** (`settings.py`): Добавлен `@field_validator("webhook_url")` который
+  выводит `logger.warning` если `webhook_url` задан в .env (бот работает только в polling).
+
+### Fixed — БЛОК 4: Недостающий функционал
+
+- **BUG 4.1** (`main_menu.py`): Добавлены кнопки `📆 Расписание`, `🔔 Уведомления`
+  и `📤 Поделиться` в главное меню клиента. Хендлеры уже существовали в
+  `final_features_handler.py`, но кнопок не было.
+
+- **BUG 4.2** (`admin_handler.py`): Добавлена проверка `_is_admin()` в начало
+  хендлера `admin_client_history_cb`. Ранее любой пользователь мог вызвать
+  состояние истории зная callback_data.
+
+- **BUG 4.3** (`extended_features_handler.py`): Удалён дублирующий хендлер
+  `admin_view_history` — мёртвый код без кнопки в интерфейсе.
+  Корректный путь: `admin_client_history` → `admin_search_client_history`.
+
+- **BUG 4.4** (`admin.py`): Добавлена кнопка `📋 Шаблоны расписания` в
+  `AdminKeyboard.schedule_menu()`. Функционал шаблонов теперь доступен из меню расписания.
+
+- **BUG 4.5** (`reminder_service.py`): В `_send_reminder_job` добавлен вызов
+  `mark_reminder_sent(appointment_id)` после успешной отправки напоминания.
+
+### Fixed — БЛОК 5: Упаковка и документация
+
+- **BUG 5.1** (`.env.example`): Задокументированы все поля из `settings.py`:
+  `WEBHOOK_URL`, `WEBHOOK_PORT`, `SCHEDULE_CHANNEL_ID`, `HEALTH_PORT`, `METRICS_TOKEN`
+  и другие. У каждого поля пример значения и комментарий на русском.
+
+- **BUG 5.2** (`.github/workflows/ci.yml`): Шаг установки зависимостей уже присутствует
+  в CI. Проверено соответствие.
+
+- **BUG 5.3** (`pyproject.toml`): Добавлен `filterwarnings` в `[tool.pytest.ini_options]`
+  для подавления `PytestConfigWarning` и `PytestUnknownMarkWarning`.
+
+### Added
+
+- `Makefile` с целями: `make test`, `make lint`, `make format`, `make typecheck`, `make run`
+- `src/config/config_writer.py` — вынесенная логика атомарного сохранения config.json
+
 ## [4.3.0] — 2026-06-08 (Bug Fixes & Refactoring)
 
 ### Fixed — Критические баги исправлены
