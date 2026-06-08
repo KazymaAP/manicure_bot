@@ -28,7 +28,8 @@ def _load_local_config() -> dict[str, Any]:
     config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
     try:
         with open(config_path, encoding="utf-8") as f:
-            return json.load(f)
+            data: dict[str, Any] = json.load(f)
+            return data
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError:
@@ -36,7 +37,8 @@ def _load_local_config() -> dict[str, Any]:
 
 
 def _cfg() -> dict[str, Any]:
-    return _load_local_config() or {}
+    result = _load_local_config()
+    return result if result else {}
 
 
 def _fmt_date(date_str: str) -> str:
@@ -52,7 +54,7 @@ class MessageFormatter:
     """Все текстовые шаблоны приложения."""
 
     @staticmethod
-    def _tpl(key: str, default: str, **kwargs) -> str:
+    def _tpl(key: str, default: str, **kwargs: Any) -> str:
         cfg = _cfg()
         parts = key.split(".")
         cur = cfg
@@ -98,14 +100,15 @@ class MessageFormatter:
     def after_visit_thank_you(name: str) -> str:
         """Сообщение после визита — благодарность и предложение записаться снова."""
         cfg = _cfg()
-        text = cfg.get("master", {}).get(
-            "after_visit_text",
+        default_text = (
             f"Спасибо, что была у меня, {_escape(name)}! 🌷\n\n"
             "Надеюсь, тебе всё понравилось. Буду рада видеть тебя снова!\n"
             "Если хочешь — запишись уже сейчас 😊"
         )
+        raw = cfg.get("master", {}).get("after_visit_text", default_text)
+        text: str = raw if isinstance(raw, str) else default_text
         try:
-            return text.format(name=_escape(name))
+            return str(text.format(name=_escape(name)))
         except Exception:
             return text
 
@@ -254,20 +257,21 @@ class MessageFormatter:
             f"<i>Напоминание придёт за {hours_before} ч до визита</i>"
         )
         cfg = _cfg()
-        tpl = cfg.get("booking", {}).get(
+        raw_tpl = cfg.get("booking", {}).get(
             "success",
             "✅ {name}, жду тебя {date} в {time}! 🌸\n\n"
             "Если что-то изменится — напиши сюда :)\n\n"
             "<i>Напоминание придёт за {hours_before} ч до визита</i>"
         )
+        tpl: str = raw_tpl if isinstance(raw_tpl, str) else default
         try:
             name_word = _escape(client_name) if client_name else "Отлично"
-            return tpl.format(
+            return str(tpl.format(
                 name=name_word,
                 date=formatted_date,
                 time=time_str,
                 hours_before=hours_before,
-            )
+            ))
         except Exception:
             return default
 
@@ -356,11 +360,11 @@ class MessageFormatter:
     # ── Цены ──────────────────────────────────────────────────────────────
 
     @staticmethod
-    def prices_list(services: dict) -> str:
+    def prices_list(services: dict[str, Any]) -> str:
         """Красивый прайс-лист из словаря services."""
         cfg = _cfg()
-        title = cfg.get("prices_title", "💅 <b>Прайс-лист</b>\n\n")
-        footer = cfg.get("prices_footer", "\n\n<i>По вопросам — нажмите «Связаться с мастером»</i>")
+        title: str = str(cfg.get("prices_title", "💅 <b>Прайс-лист</b>\n\n"))
+        footer: str = str(cfg.get("prices_footer", "\n\n<i>По вопросам — нажмите «Связаться с мастером»</i>"))
 
         # Эмодзи для услуг
         service_emojis = {
@@ -709,14 +713,17 @@ class MessageFormatter:
         time: str,
         appt_id: int | None = None,
         username: str | None = None,
+        phone: str | None = None,
     ) -> str:
         formatted_date = _fmt_date(date)
         username_line = f" (@{_escape(username)})" if username else ""
         id_line = f" #{appt_id}" if appt_id else ""
+        phone_line = f"\n📱 {_escape(phone)}" if phone else ""
         return (
             f"❌ <b>Отмена записи{id_line}</b>\n\n"
             f"👤 {_escape(client_name)}{username_line}\n"
             f"📅 {formatted_date}  🕐 {time}"
+            f"{phone_line}"
         )
 
     @staticmethod
@@ -774,7 +781,7 @@ class MessageFormatter:
     # ── Настройки ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def admin_settings_menu(settings_dict: dict) -> str:
+    def admin_settings_menu(settings_dict: dict[str, Any]) -> str:
         """Текущие настройки бота."""
         master_name = settings_dict.get("master_name", "—")
         welcome = settings_dict.get("welcome_text", "—")[:80] + "..."
@@ -868,11 +875,11 @@ class MessageFormatter:
                                                address=address or None, maps_link=maps_link or None)
 
     @staticmethod
-    def price_list(services: dict) -> str:
+    def price_list(services: dict[str, Any]) -> str:
         return MessageFormatter.prices_list(services)
 
     @staticmethod
-    def schedule_view_for_client(dates: list[str], free_slots_per_date: dict) -> str:
+    def schedule_view_for_client(dates: list[str], free_slots_per_date: dict[str, Any]) -> str:
         if not dates:
             return MessageFormatter.no_available_dates()
         lines = ["📅 <b>Ближайшие свободные дни:</b>\n"]

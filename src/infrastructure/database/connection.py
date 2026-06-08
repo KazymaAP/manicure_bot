@@ -30,6 +30,7 @@ class DatabaseManager:
 
     _instance: DatabaseManager | None = None
     _initialized: bool = False
+    _db_path: str  # объявлено здесь для mypy; присваивается в __init__
     _thread_local = threading.local()
     _lock = threading.RLock()  # FIXED: блокировка для потокобезопасного создания/сброса
 
@@ -125,8 +126,9 @@ class DatabaseManager:
         FIXED: не закрываем соединение автоматически — управление жизненным циклом перенесено в close()/reset().
         FIXED: регистрируем соединение в self._connections для правильного закрытия при shutdown.
         """
-        if not hasattr(self._thread_local, 'conn') or self._thread_local.conn is None:
-            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        thread_conn: sqlite3.Connection | None = getattr(self._thread_local, 'conn', None)
+        if thread_conn is None:
+            conn: sqlite3.Connection = sqlite3.connect(self._db_path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             # FIXED BUG-07: WAL-режим устанавливается для каждого нового соединения,
             # а не только в initialize_schema(). SQLite WAL глобален для файла, но
@@ -141,7 +143,8 @@ class DatabaseManager:
             thread_id = threading.get_ident()
             with self._connections_lock:
                 self._connections[thread_id] = conn
-        return self._thread_local.conn
+        result: sqlite3.Connection = self._thread_local.conn
+        return result
 
     @contextmanager
     def transaction(self) -> Generator[sqlite3.Connection, None, None]:

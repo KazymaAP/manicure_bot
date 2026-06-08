@@ -4,6 +4,7 @@ src/domain/models/working_day.py — Доменная модель «Рабоч�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from src.domain.enums import DayStatus
 
@@ -41,7 +42,7 @@ class WorkingDay:
         self.status = DayStatus.OPEN
 
     @classmethod
-    def from_row(cls, row: dict) -> WorkingDay:
+    def from_row(cls, row: dict[str, Any]) -> WorkingDay:
         """Создаёт экземпляр из строки БД.
 
         Args:
@@ -56,7 +57,7 @@ class WorkingDay:
             status=DayStatus(row.get("is_closed", 0)),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Сериализует объект в словарь."""
         return {
             "id": self.id,

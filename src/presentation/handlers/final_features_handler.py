@@ -266,44 +266,44 @@ def setup_final_features_router(container: Container) -> Router:
             parse_mode="HTML",
         )
 
+    async def _toggle_notification_field(
+        callback: CallbackQuery,
+        field_name: str,
+        label: str,
+    ) -> None:
+        """Вспомогательная функция переключения поля уведомлений (пункт 9).
+
+        Устраняет дублирование: notif_24h_handler, notif_2h_handler и notif_1h_handler
+        содержали идентичную логику — отличалось только имя поля и текст ответа.
+
+        Args:
+            callback: Объект callback-запроса.
+            field_name: Имя поля в таблице users (notif_24h / notif_2h / notif_1h).
+            label: Текстовое описание для callback-ответа (напр. "за 24 часа").
+        """
+        user_id = callback.from_user.id
+        current = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
+        new_val = 0 if current.get(field_name, 1) else 1
+        await asyncio.to_thread(_update_user_notif, user_id, **{field_name: new_val})
+        status = "включено 🔔" if new_val else "отключено 🔕"
+        await callback.answer(f"Напоминание {label}: {status}", show_alert=True)
+        updated = {**current, field_name: new_val}
+        await callback.message.edit_reply_markup(reply_markup=NotificationKeyboard.settings(updated))
+
     @router.callback_query(F.data == "notif_24h")
     async def notif_24h_handler(callback: CallbackQuery) -> None:
         """Переключает уведомление за 24 часа. FIXED БАГ #17: обновляет клавиатуру."""
-        user_id = callback.from_user.id
-        # ПРОБЛЕМА 8 FIX: используем appt_service.get_user_notification_settings
-        current = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
-        new_val = 0 if current.get("notif_24h", 1) else 1
-        await asyncio.to_thread(_update_user_notif, user_id, notif_24h=new_val)
-        status = "включено 🔔" if new_val else "отключено 🔕"
-        await callback.answer(f"Напоминание за 24 часа: {status}", show_alert=True)
-        updated = {**current, "notif_24h": new_val}
-        await callback.message.edit_reply_markup(reply_markup=NotificationKeyboard.settings(updated))
+        await _toggle_notification_field(callback, "notif_24h", "за 24 часа")
 
     @router.callback_query(F.data == "notif_2h")
     async def notif_2h_handler(callback: CallbackQuery) -> None:
         """Переключает уведомление за 2 часа. FIXED БАГ #17: обновляет клавиатуру."""
-        user_id = callback.from_user.id
-        # ПРОБЛЕМА 8 FIX: используем appt_service.get_user_notification_settings
-        current = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
-        new_val = 0 if current.get("notif_2h", 1) else 1
-        await asyncio.to_thread(_update_user_notif, user_id, notif_2h=new_val)
-        status = "включено 🔔" if new_val else "отключено 🔕"
-        await callback.answer(f"Напоминание за 2 часа: {status}", show_alert=True)
-        updated = {**current, "notif_2h": new_val}
-        await callback.message.edit_reply_markup(reply_markup=NotificationKeyboard.settings(updated))
+        await _toggle_notification_field(callback, "notif_2h", "за 2 часа")
 
     @router.callback_query(F.data == "notif_1h")
     async def notif_1h_handler(callback: CallbackQuery) -> None:
         """Переключает уведомление за 1 час. FIXED БАГ #17: обновляет клавиатуру."""
-        user_id = callback.from_user.id
-        # ПРОБЛЕМА 8 FIX: используем appt_service.get_user_notification_settings
-        current = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
-        new_val = 0 if current.get("notif_1h", 1) else 1
-        await asyncio.to_thread(_update_user_notif, user_id, notif_1h=new_val)
-        status = "включено 🔔" if new_val else "отключено 🔕"
-        await callback.answer(f"Напоминание за 1 час: {status}", show_alert=True)
-        updated = {**current, "notif_1h": new_val}
-        await callback.message.edit_reply_markup(reply_markup=NotificationKeyboard.settings(updated))
+        await _toggle_notification_field(callback, "notif_1h", "за 1 час")
 
     # ═══════════════════════════════════════════════════════════════════════
     # АРХИВИРОВАНИЕ И ЧИСТКА

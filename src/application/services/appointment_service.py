@@ -109,8 +109,11 @@ class AppointmentService:
                     raise SlotAlreadyBookedError(dto.date, dto.time)
 
                 # 4) вставляем запись в appointments в той же транзакции
+                created_at_obj = getattr(dto, "created_at", None)
                 created_at = (
-                    dto.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(dto, "created_at", None) else _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    created_at_obj.strftime("%Y-%m-%d %H:%M:%S")
+                    if created_at_obj is not None
+                    else _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 )
                 ins = conn.execute(
                     "INSERT INTO appointments (user_id, username, client_name, phone, date, time, created_at, comment, service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -127,6 +130,8 @@ class AppointmentService:
                     ),
                 )
                 appointment_id = ins.lastrowid
+                if appointment_id is None:
+                    raise RuntimeError("Failed to insert appointment: lastrowid is None")
                 logger.info(
                     "Booking created: id=%s user_id=%s date=%s time=%s",
                     appointment_id, dto.user_id, dto.date, dto.time,

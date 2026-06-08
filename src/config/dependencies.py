@@ -108,7 +108,16 @@ class Container:
         service_durations = {}
         for name, info in (self._settings.services or {}).items():
             try:
-                duration = int(info.get("duration", 0)) if isinstance(info, dict) else int(info)
+                if isinstance(info, dict):
+                    duration = int(info.get("duration", 0))
+                elif isinstance(info, int):
+                    duration = info
+                else:
+                    logger.warning(
+                        "Unexpected type for service %r info: %s, expected dict or int",
+                        name, type(info).__name__,
+                    )
+                    duration = 0
             except Exception:
                 duration = 0
             service_durations[name] = duration

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Any
 
 from src.domain.models.appointment import Appointment
 from src.infrastructure.database.connection import DatabaseManager
@@ -51,6 +52,8 @@ class AppointmentRepository(BaseRepository):
                     appointment.service,
                 ),
             )
+            if cur.lastrowid is None:
+                raise RuntimeError("Failed to insert appointment: lastrowid is None")
             return cur.lastrowid
 
     def get_by_id(self, appointment_id: int) -> Appointment | None:
@@ -315,7 +318,7 @@ class AppointmentRepository(BaseRepository):
             ).fetchone()
         return Appointment.from_row(dict(row)) if row else None
 
-    def get_client_history(self, user_id: int) -> dict:
+    def get_client_history(self, user_id: int) -> dict[str, Any]:
         """Возвращает статистику по клиенту: кол-во посещений, последний визит, отмены.
 
         FIXED: для отображения в admin-панели истории клиента.
@@ -363,7 +366,7 @@ class AppointmentRepository(BaseRepository):
             row = conn.execute("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)).fetchone()
             return row is not None
 
-    def get_month_statistics(self, year: int, month: int) -> dict:
+    def get_month_statistics(self, year: int, month: int) -> dict[str, Any]:
         """Возвращает статистику по месяцам для админ-панели.
 
         FIXED: статистика по месяцам, популярные дни, пиковые часы.
@@ -441,4 +444,5 @@ class AppointmentRepository(BaseRepository):
                 f"DELETE FROM appointments WHERE id IN ({placeholders})",
                 tuple(appointment_ids),
             )
-            return conn.execute("SELECT changes()").fetchone()[0]
+            row = conn.execute("SELECT changes()").fetchone()
+            return int(row[0]) if row else 0

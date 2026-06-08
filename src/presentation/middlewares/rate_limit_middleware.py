@@ -36,7 +36,12 @@ class RateLimitMiddleware(BaseMiddleware):
         # FIXED H-01: время последней очистки для периодической очистки устаревших бакетов
         self._last_cleanup: float = time.time()
 
-    async def __call__(self, handler, event: TelegramObject, data: dict[str, Any]):
+    async def __call__(  # type: ignore[override]
+        self,
+        handler: Any,
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
         user_id = None
         try:
             # FIXED BUG-08: в aiogram 3.x event в middleware уже является конкретным типом

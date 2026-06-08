@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from typing import Any
 
 from src.domain.models.time_slot import TimeSlot
 from src.domain.models.working_day import WorkingDay
@@ -272,7 +273,7 @@ class ScheduleRepository(BaseRepository):
         with self._db.transaction() as conn:
             return self.book_slots_with_conn(conn, date, time, duration_minutes)
 
-    def book_slots_with_conn(self, conn, date: str, time: str, duration_minutes: int = 0) -> bool:
+    def book_slots_with_conn(self, conn: sqlite3.Connection, date: str, time: str, duration_minutes: int = 0) -> bool:
         """Вспомогательная версия для использования внутри внешней транзакции.
 
         FIXED: позволяет вызывать бронирование внутри уже открытой транзакции
@@ -409,7 +410,7 @@ class ScheduleRepository(BaseRepository):
             )
         return True
 
-    def get_waitlist_for_date(self, date: str) -> list[dict]:
+    def get_waitlist_for_date(self, date: str) -> list[dict[str, Any]]:
         """Возвращает список записей в листе ожидания для даты (по порядку добавления)."""
         with self._db.read_connection() as conn:
             rows = conn.execute("SELECT * FROM waitlist WHERE date = ? ORDER BY id", (date,)).fetchall()
@@ -433,9 +434,11 @@ class ScheduleRepository(BaseRepository):
                 """,
                 (name, schedule),
             )
-        return cur.lastrowid
+            if cur.lastrowid is None:
+                raise RuntimeError("Failed to insert workday template: lastrowid is None")
+            return cur.lastrowid
 
-    def get_workday_templates(self) -> list[dict]:
+    def get_workday_templates(self) -> list[dict[str, Any]]:
         """Возвращает все сохранённые шаблоны."""
         with self._db.read_connection() as conn:
             rows = conn.execute(
@@ -448,7 +451,7 @@ class ScheduleRepository(BaseRepository):
         with self._db.transaction() as conn:
             conn.execute("DELETE FROM workday_templates WHERE id = ?", (template_id,))
 
-    def get_workday_template(self, template_id: int) -> dict | None:
+    def get_workday_template(self, template_id: int) -> dict[str, Any] | None:
         """Возвращает конкретный шаблон.
 
         FIXED: используется правильное имя колонки `slots` вместо `schedule`.

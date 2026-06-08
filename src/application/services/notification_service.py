@@ -18,6 +18,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from aiogram import Bot
+    from aiogram.types import (
+        ForceReply,
+        InlineKeyboardMarkup,
+        ReplyKeyboardMarkup,
+        ReplyKeyboardRemove,
+    )
 
 from src.infrastructure.repositories.appointment_repository import AppointmentRepository
 from src.presentation.formatters.message_formatter import MessageFormatter
@@ -179,6 +185,8 @@ class NotificationService:
             client_name=appt.client_name,
             date=appt.date,
             time=appt.time,
+            appt_id=appt.id,
+            username=appt.username,
             phone=appt.phone,
         )
         for admin_id in self._admin_ids:
@@ -277,7 +285,7 @@ class NotificationService:
         self,
         chat_id: int,
         text: str,
-        markup: object | None = None,
+        markup: InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove | ForceReply | None = None,
     ) -> bool:
         """Безопасно отправляет сообщение с клавиатурой.
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from src.domain.enums import AppointmentStatus
 
@@ -92,7 +93,7 @@ class Appointment:
         self.reminder_sent = True
 
     @classmethod
-    def from_row(cls, row: dict) -> Appointment:
+    def from_row(cls, row: dict[str, Any]) -> Appointment:
         """Создаёт экземпляр из строки БД.
 
         Args:
@@ -127,7 +128,7 @@ class Appointment:
             service=row.get("service"),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Сериализует объект в словарь для хранения в БД."""
         return {
             "id": self.id,

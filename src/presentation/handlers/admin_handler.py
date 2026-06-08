@@ -723,26 +723,18 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             parse_mode="HTML",
         )
 
-    @router.callback_query(F.data == "admin_open_day_cb")
-    async def admin_open_day_cb(callback: CallbackQuery, state: FSMContext) -> None:
-        if not _is_admin(callback.from_user.id):
-            await callback.answer()
-            return
-        await state.update_data(is_opening=True)
-        await state.set_state(AdminFSM.waiting_for_toggle_date)
-        await callback.message.answer(
-            MessageFormatter.admin_enter_date(),
-            reply_markup=AdminKeyboard.cancel(),
-            parse_mode="HTML",
-        )
-        await callback.answer()
+    @router.callback_query(F.data.in_({"admin_open_day_cb", "admin_close_day_cb"}))
+    async def admin_toggle_day_cb(callback: CallbackQuery, state: FSMContext) -> None:
+        """Объединённый хендлер открытия/закрытия дня (пункт 8: устранено дублирование).
 
-    @router.callback_query(F.data == "admin_close_day_cb")
-    async def admin_close_day_cb(callback: CallbackQuery, state: FSMContext) -> None:
+        Ранее admin_open_day_cb и admin_close_day_cb содержали идентичный код.
+        Теперь is_opening определяется по значению callback.data.
+        """
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
-        await state.update_data(is_opening=False)
+        is_opening = callback.data == "admin_open_day_cb"
+        await state.update_data(is_opening=is_opening)
         await state.set_state(AdminFSM.waiting_for_toggle_date)
         await callback.message.answer(
             MessageFormatter.admin_enter_date(),
@@ -922,21 +914,30 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             logger.debug("Suppressed: _get_master_name error: %s", exc, exc_info=True)
             return "Мастер"
 
-    @router.message(F.text == "⚙️ Настройки")
-    async def admin_settings(message: Message) -> None:
-        if not _is_admin(message.from_user.id):
-            return
-        settings_dict = {
+    def _build_settings_dict() -> dict:
+        """Вспомогательная функция: формирует словарь настроек для дашборда.
+
+        Устраняет дублирование (пункт 7): ранее идентичный блок формировался
+        в admin_settings() и admin_settings_cb() отдельно.
+        """
+        return {
             "master_name": _get_master_name(),
-            "welcome_text": settings.services and "настроен" or "по умолчанию",
-            "work_hours": f"{settings.default_time_slots[0] if settings.default_time_slots else '09:00'} - "
-                          f"{settings.default_time_slots[-1] if settings.default_time_slots else '18:00'}",
+            "welcome_text": ("настроен" if settings.services else "по умолчанию"),
+            "work_hours": (
+                f"{settings.default_time_slots[0] if settings.default_time_slots else '09:00'} - "
+                f"{settings.default_time_slots[-1] if settings.default_time_slots else '18:00'}"
+            ),
             "slot_interval": "60",
             "reminder_hours": str(settings.reminder_hours_before),
             "services_count": len(settings.services or {}),
         }
+
+    @router.message(F.text == "⚙️ Настройки")
+    async def admin_settings(message: Message) -> None:
+        if not _is_admin(message.from_user.id):
+            return
         await message.answer(
-            MessageFormatter.admin_settings_menu(settings_dict),
+            MessageFormatter.admin_settings_menu(_build_settings_dict()),
             reply_markup=AdminKeyboard.settings_menu(),
             parse_mode="HTML",
         )
@@ -946,17 +947,8 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         if not _is_admin(callback.from_user.id):
             await callback.answer()
             return
-        settings_dict = {
-            "master_name": _get_master_name(),
-            "welcome_text": "настроен",
-            "work_hours": f"{settings.default_time_slots[0] if settings.default_time_slots else '09:00'} - "
-                          f"{settings.default_time_slots[-1] if settings.default_time_slots else '18:00'}",
-            "slot_interval": "60",
-            "reminder_hours": str(settings.reminder_hours_before),
-            "services_count": len(settings.services or {}),
-        }
         await callback.message.edit_text(
-            MessageFormatter.admin_settings_menu(settings_dict),
+            MessageFormatter.admin_settings_menu(_build_settings_dict()),
             reply_markup=AdminKeyboard.settings_menu(),
             parse_mode="HTML",
         )
