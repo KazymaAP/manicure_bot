@@ -305,9 +305,8 @@ class ScheduleService:
         """Async-обёртка: возвращает все рабочие даты в горизонте настроек (days_ahead).
 
         FIXED M-10: синхронный SQL-запрос обёрнут в asyncio.to_thread.
+        BUG 12 FIX: убран вложенный import asyncio — asyncio уже импортирован в начале модуля.
         """
-        import asyncio
-
         def _sync() -> list[str]:
             days = self._schedule_repo.get_all_days_in_range(
                 _date.today().isoformat(),
@@ -329,8 +328,8 @@ class ScheduleService:
         """Async-обёртка для добавления слота (принимает строки напрямую).
 
         FIXED: обёрнут синхронный SQLite-вызов в asyncio.to_thread.
+        BUG 12 FIX: убран вложенный import asyncio — asyncio уже импортирован в начале модуля.
         """
-        import asyncio
         if not _TIME_RE.match(time_str):
             raise ValueError(f"Invalid time format: {time_str!r}, expected HH:MM")
         h, m = map(int, time_str.split(":"))
@@ -349,9 +348,8 @@ class ScheduleService:
         """Переключает статус дня. Возвращает True если день теперь открыт.
 
         FIXED: синхронные SQL-вызовы обёрнуты в asyncio.to_thread.
+        BUG 12 FIX: убран вложенный import asyncio — asyncio уже импортирован в начале модуля.
         """
-        import asyncio
-
         def _toggle():
             day = self._schedule_repo.get_working_day(date_str)
             if not day:

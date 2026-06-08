@@ -15,10 +15,12 @@ import logging
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src.config.dependencies import Container
+from src.domain.enums.fsm_states import BookingFSM
 from src.presentation.formatters.message_formatter import MessageFormatter
+from src.presentation.keyboards.booking import BookingKeyboard
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
 
 logger = logging.getLogger(__name__)
@@ -209,7 +211,6 @@ def setup_common_router(container: Container) -> Router:
 
         # Кнопка "Написать мастеру" если есть username
         if master_username:
-            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
                     text="✉️ Написать мастеру",
@@ -223,16 +224,16 @@ def setup_common_router(container: Container) -> Router:
     # ── Callback: книга записаться снова ──────────────────────────────────
     @router.callback_query(F.data == "book_again_start")
     async def book_again_start(callback: CallbackQuery, state: FSMContext) -> None:
-        """Запускает процесс новой записи из кнопки 'Записаться снова'."""
+        """Запускает процесс новой записи из кнопки 'Записаться снова'.
+
+        BUG 13/14 FIX: убран антипаттерн __import__() и перенесены импорты
+        BookingFSM и BookingKeyboard в начало файла.
+        """
         await state.clear()
-        # Редиректим на начало записи
-        from src.domain.enums.fsm_states import BookingFSM
         await state.set_state(BookingFSM.choosing_service)
         await callback.message.answer(
             MessageFormatter.choose_service(),
-            reply_markup=__import__(
-                'src.presentation.keyboards.booking', fromlist=['BookingKeyboard']
-            ).BookingKeyboard.service_selection(settings.services or None),
+            reply_markup=BookingKeyboard.service_selection(settings.services or None),
             parse_mode="HTML",
         )
         await callback.answer()

@@ -18,12 +18,14 @@ from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src.config.dependencies import Container
 from src.domain.enums.fsm_states import AdminFSM, BookingFSM
 from src.presentation.formatters.message_formatter import MessageFormatter
 from src.presentation.keyboards.admin import AdminKeyboard
+from src.presentation.keyboards.booking import BookingKeyboard
+from src.presentation.keyboards.calendar import CalendarKeyboard
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
 
 logger = logging.getLogger(__name__)
@@ -86,8 +88,7 @@ def setup_extended_features_router(container: Container) -> Router:
             return
 
         today = _date.today()
-        from src.presentation.keyboards.calendar import CalendarKeyboard
-
+        # BUG 13 FIX: CalendarKeyboard импортирован в начале файла, не inline
         cal = CalendarKeyboard.build(
             year=today.year,
             month=today.month,
@@ -128,7 +129,7 @@ def setup_extended_features_router(container: Container) -> Router:
             await callback.answer()
             return
         available_dates = await sched_service.get_available_dates_async()
-        from src.presentation.keyboards.calendar import CalendarKeyboard
+        # BUG 13 FIX: CalendarKeyboard импортирован в начале файла, не inline
         cal = CalendarKeyboard.build(
             year=year,
             month=month,
@@ -165,8 +166,7 @@ def setup_extended_features_router(container: Container) -> Router:
         await state.update_data(transfer_new_date=date_str)
         await state.set_state(BookingFSM.transferring_choosing_time)
 
-        from src.presentation.keyboards.booking import BookingKeyboard
-
+        # BUG 13 FIX: BookingKeyboard импортирован в начале файла, не inline
         # FIXED BUG 3: метод time_selection добавлен в BookingKeyboard
         kb = BookingKeyboard.time_selection(available_times)
         await callback.message.edit_text(
@@ -205,8 +205,8 @@ def setup_extended_features_router(container: Container) -> Router:
             await state.clear()
             return
 
-        from src.application.dto.booking_dto import CreateBookingDTO
-        from src.domain.exceptions.appointment import (
+        from src.application.dto.booking_dto import CreateBookingDTO  # noqa: PLC0415
+        from src.domain.exceptions.appointment import (  # noqa: PLC0415
             SlotAlreadyBookedError,
         )
 
@@ -431,6 +431,7 @@ def setup_extended_features_router(container: Container) -> Router:
         )
 
         from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        # BUG 13 FIX: InlineKeyboardButton/InlineKeyboardMarkup импортированы в начале файла
         back_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад к фильтрам", callback_data="admin_back_main")]
         ])
@@ -527,7 +528,7 @@ def setup_extended_features_router(container: Container) -> Router:
             await callback.answer("ℹ️ Нет сохранённых шаблонов для удаления", show_alert=True)
             return
 
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        # BUG 13 FIX: InlineKeyboardButton/InlineKeyboardMarkup импортированы в начале файла
         buttons = []
         for tmpl in templates:
             buttons.append([InlineKeyboardButton(
@@ -576,7 +577,7 @@ def setup_extended_features_router(container: Container) -> Router:
             await callback.answer("ℹ️ Нет сохранённых шаблонов для применения", show_alert=True)
             return
 
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        # BUG 13 FIX: InlineKeyboardButton/InlineKeyboardMarkup импортированы в начале файла
         buttons = []
         for tmpl in templates:
             slots_preview = tmpl.get('slots', '')[:30]

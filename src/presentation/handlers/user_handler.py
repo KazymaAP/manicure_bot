@@ -453,15 +453,35 @@ def setup_user_router(container: Container) -> Router:  # noqa: C901
     # ── Отмена записи (из списка «Мои записи») ────────────────────────────
     @router.callback_query(F.data.startswith("cancel_appt:"))
     async def cancel_appointment(callback: CallbackQuery) -> None:
+        """Отменяет запись и обновляет список.
+
+        BUG 25 FIX: после успешной отмены пользователь видит обновлённый список
+        активных записей или сообщение об отсутствии записей — вместо неактивного
+        сообщения об отмене без возможности вернуться к списку.
+        """
         appt_id = int(callback.data.split(":")[1])
         answered = False
         try:
             await asyncio.to_thread(appt_service.cancel_appointment, appt_id, callback.from_user.id)
             await notif_service.notify_admin_cancellation(appt_id)
-            await callback.message.edit_text(
-                MessageFormatter.appointment_cancel_success(),
-                reply_markup=BookingKeyboard.book_again(),
-            )
+
+            # BUG 25 FIX: после отмены показываем актуальный список записей
+            user_id = callback.from_user.id
+            remaining = await asyncio.to_thread(appt_service.get_user_appointments, user_id)
+            cancel_text = MessageFormatter.appointment_cancel_success()
+            if remaining:
+                # Ещё есть активные записи — показываем обновлённый список
+                await callback.message.edit_text(
+                    cancel_text + "\n\n" + MessageFormatter.my_appointments_list_blocks(remaining),
+                    reply_markup=BookingKeyboard.cancel_appointment_list(remaining),
+                    parse_mode="HTML",
+                )
+            else:
+                # Нет активных записей — кнопка записаться снова
+                await callback.message.edit_text(
+                    cancel_text,
+                    reply_markup=BookingKeyboard.book_again(),
+                )
             await callback.answer()
             answered = True
         except _ApptAlreadyCancelledError:

@@ -23,6 +23,8 @@ from aiogram.types import (
 
 from src.config.dependencies import Container
 from src.presentation.formatters.message_formatter import MessageFormatter
+from src.presentation.keyboards.booking import BookingKeyboard
+from src.presentation.keyboards.calendar import CalendarKeyboard
 from src.presentation.keyboards.main_menu import MainMenuKeyboard
 from src.presentation.keyboards.notifications import NotificationKeyboard
 
@@ -68,8 +70,7 @@ def setup_final_features_router(container: Container) -> Router:
                 f"   Комментарий: {appt.comment or 'нет'}\n\n"
             )
 
-        from src.presentation.keyboards.booking import BookingKeyboard
-
+        # BUG 13 FIX: BookingKeyboard импортирован в начале файла
         # FIXED BUG 3: метод my_appointments_actions не существует, используем cancel_appointment_list
         kb = BookingKeyboard.cancel_appointment_list(appts)
         await message.answer(text, reply_markup=kb)
@@ -97,8 +98,7 @@ def setup_final_features_router(container: Container) -> Router:
                 return
 
             text = MessageFormatter.nearby_slots_list(slots)
-            from src.presentation.keyboards.calendar import CalendarKeyboard
-
+            # BUG 13 FIX: CalendarKeyboard импортирован в начале файла
             kb = CalendarKeyboard.build(
                 year=_date.today().year,
                 month=_date.today().month,
@@ -225,12 +225,18 @@ def setup_final_features_router(container: Container) -> Router:
     # FIXED BUG-09: хендлеры для всех 5 callback уведомлений (ранее отсутствовали)
     @router.callback_query(F.data == "notif_all_on")
     async def notif_all_on_handler(callback: CallbackQuery) -> None:
-        """Включает все уведомления."""
+        """Включает все уведомления.
+
+        BUG 17 FIX: после записи перечитываем актуальные данные из БД через
+        appt_service.get_user_notification_settings() вместо захардкоденного словаря.
+        Это гарантирует что клавиатура отражает реальное состояние в БД.
+        """
         user_id = callback.from_user.id
         await asyncio.to_thread(_update_user_notif, user_id,
                                 notifications_enabled=1, notif_24h=1, notif_2h=1, notif_1h=1)
         await callback.answer("✅ Все уведомления включены", show_alert=True)
-        updated = {"notifications_enabled": 1, "notif_24h": 1, "notif_2h": 1, "notif_1h": 1}
+        # BUG 17 FIX: читаем актуальные данные из БД, не используем захардкоденный словарь
+        updated = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
         await callback.message.edit_text(
             "🔔 <b>Управление уведомлениями</b>\n\n"
             "Текущий статус: <b>включены ✅</b>\n\n"
@@ -241,12 +247,17 @@ def setup_final_features_router(container: Container) -> Router:
 
     @router.callback_query(F.data == "notif_all_off")
     async def notif_all_off_handler(callback: CallbackQuery) -> None:
-        """Отключает все уведомления."""
+        """Отключает все уведомления.
+
+        BUG 17 FIX: после записи перечитываем актуальные данные из БД через
+        appt_service.get_user_notification_settings() вместо захардкоденного словаря.
+        """
         user_id = callback.from_user.id
         await asyncio.to_thread(_update_user_notif, user_id,
                                 notifications_enabled=0, notif_24h=0, notif_2h=0, notif_1h=0)
         await callback.answer("❌ Все уведомления отключены", show_alert=True)
-        updated = {"notifications_enabled": 0, "notif_24h": 0, "notif_2h": 0, "notif_1h": 0}
+        # BUG 17 FIX: читаем актуальные данные из БД, не используем захардкоденный словарь
+        updated = await asyncio.to_thread(appt_service.get_user_notification_settings, user_id)
         await callback.message.edit_text(
             "🔔 <b>Управление уведомлениями</b>\n\n"
             "Текущий статус: <b>отключены ❌</b>\n\n"

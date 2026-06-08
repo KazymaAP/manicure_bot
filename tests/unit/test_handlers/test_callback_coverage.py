@@ -5,9 +5,28 @@ tests/unit/test_handlers/test_callback_coverage.py — Проверка покр
 имеют соответствующие хендлеры в роутерах.
 
 Тесты намеренно лёгкие (без запуска aiogram) — проверяют структуру кода.
+BUG ruff FIX: убран неиспользуемый import pytest; все импорты вынесены в начало файла.
 """
-import pytest
+from aiogram.types import InlineKeyboardMarkup
 
+from src.application.services.appointment_service import AppointmentService
+from src.domain.enums.fsm_states import AdminFSM
+from src.infrastructure.repositories.appointment_repository import AppointmentRepository
+from src.presentation.handlers import (
+    setup_admin_router,
+    setup_common_router,
+    setup_extended_features_router,
+    setup_final_features_router,
+    setup_user_router,
+)
+from src.presentation.keyboards import (
+    AdminKeyboard,
+    BookingKeyboard,
+    CalendarKeyboard,
+    MainMenuKeyboard,
+    NotificationKeyboard,
+)
+from src.presentation.keyboards.notifications import NotificationKeyboard as _NotifKB
 
 # ── Список всех статических callback_data из keyboards/ ─────────────────────
 # Обновить при добавлении новых кнопок
@@ -169,39 +188,31 @@ class TestNotificationKeyboardImport:
     """ПРОБЛЕМА 2/16: проверяет что NotificationKeyboard импортируется корректно."""
 
     def test_import_notification_keyboard(self):
-        from src.presentation.keyboards.notifications import NotificationKeyboard
-        assert NotificationKeyboard is not None
+        assert _NotifKB is not None
 
     def test_notification_keyboard_has_settings_method(self):
-        from src.presentation.keyboards.notifications import NotificationKeyboard
-        assert hasattr(NotificationKeyboard, "settings")
-        assert callable(NotificationKeyboard.settings)
+        assert hasattr(_NotifKB, "settings")
+        assert callable(_NotifKB.settings)
 
     def test_notification_keyboard_settings_returns_markup(self):
-        from aiogram.types import InlineKeyboardMarkup
-        from src.presentation.keyboards.notifications import NotificationKeyboard
-
         notif_settings = {
             "notifications_enabled": 1,
             "notif_24h": 1,
             "notif_2h": 0,
             "notif_1h": 1,
         }
-        kb = NotificationKeyboard.settings(notif_settings)
+        kb = _NotifKB.settings(notif_settings)
         assert isinstance(kb, InlineKeyboardMarkup)
         assert len(kb.inline_keyboard) == 4
 
     def test_notification_keyboard_all_off(self):
-        from aiogram.types import InlineKeyboardMarkup
-        from src.presentation.keyboards.notifications import NotificationKeyboard
-
         notif_settings = {
             "notifications_enabled": 0,
             "notif_24h": 0,
             "notif_2h": 0,
             "notif_1h": 0,
         }
-        kb = NotificationKeyboard.settings(notif_settings)
+        kb = _NotifKB.settings(notif_settings)
         assert isinstance(kb, InlineKeyboardMarkup)
         # Первая кнопка должна иметь callback_data "notif_all_on" (для включения)
         first_button = kb.inline_keyboard[0][0]
@@ -212,13 +223,6 @@ class TestKeyboardsInitExports:
     """ПРОБЛЕМА 17: проверяет что keyboards/__init__.py экспортирует все клавиатуры."""
 
     def test_import_all_keyboards(self):
-        from src.presentation.keyboards import (
-            AdminKeyboard,
-            BookingKeyboard,
-            CalendarKeyboard,
-            MainMenuKeyboard,
-            NotificationKeyboard,
-        )
         assert AdminKeyboard is not None
         assert BookingKeyboard is not None
         assert CalendarKeyboard is not None
@@ -230,13 +234,6 @@ class TestHandlersInitExports:
     """ПРОБЛЕМА 19: проверяет что handlers/__init__.py экспортирует setup-функции."""
 
     def test_import_setup_functions(self):
-        from src.presentation.handlers import (
-            setup_admin_router,
-            setup_common_router,
-            setup_extended_features_router,
-            setup_final_features_router,
-            setup_user_router,
-        )
         assert callable(setup_admin_router)
         assert callable(setup_common_router)
         assert callable(setup_extended_features_router)
@@ -249,21 +246,18 @@ class TestFSMStatesClean:
 
     def test_waiting_for_broadcast_removed(self):
         """waiting_for_broadcast не должно существовать в AdminFSM."""
-        from src.domain.enums.fsm_states import AdminFSM
         assert not hasattr(AdminFSM, "waiting_for_broadcast"), (
             "AdminFSM.waiting_for_broadcast должно быть удалено (ПРОБЛЕМА 4)"
         )
 
     def test_specific_broadcast_state_exists(self):
         """Отдельные состояния для разных режимов должны существовать."""
-        from src.domain.enums.fsm_states import AdminFSM
         assert hasattr(AdminFSM, "waiting_for_broadcast_text")
         assert hasattr(AdminFSM, "waiting_for_welcome_text")
         assert hasattr(AdminFSM, "waiting_for_photo_url")
 
     def test_template_date_state_exists(self):
         """ПРОБЛЕМА 5: waiting_for_template_date должно существовать."""
-        from src.domain.enums.fsm_states import AdminFSM
         assert hasattr(AdminFSM, "waiting_for_template_date")
 
 
@@ -271,11 +265,9 @@ class TestAppointmentServiceGetAllUserIds:
     """ПРОБЛЕМА 13: проверяет наличие метода get_all_user_ids."""
 
     def test_method_exists_in_repository(self):
-        from src.infrastructure.repositories.appointment_repository import AppointmentRepository
         assert hasattr(AppointmentRepository, "get_all_user_ids")
         assert callable(AppointmentRepository.get_all_user_ids)
 
     def test_method_exists_in_service(self):
-        from src.application.services.appointment_service import AppointmentService
         assert hasattr(AppointmentService, "get_all_user_ids")
         assert callable(AppointmentService.get_all_user_ids)

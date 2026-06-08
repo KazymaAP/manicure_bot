@@ -236,7 +236,9 @@ class NotificationService:
         ])
         try:
             await self._bot.send_message(user_id, text, parse_mode="HTML", reply_markup=kb)
-            await asyncio.to_thread(self._appointment_repo.mark_reminder_sent, appointment_id)
+            # BUG 9 FIX: mark_reminder_sent убран отсюда — вызов делается только
+            # в reminder_service._send_reminder_job() после успешной отправки.
+            # Двойной вызов создавал лишний UPDATE в БД.
             logger.info(
                 "Reminder sent to user %s for appointment #%s",
                 user_id, appointment_id,

@@ -1055,6 +1055,19 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
             )
             return
 
+        # BUG 16 FIX: проверяем расширение файла — только изображения
+        _allowed_img_ext = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
+        url_lower = url.lower().split("?")[0]  # убираем query-параметры перед проверкой
+        if not any(url_lower.endswith(ext) for ext in _allowed_img_ext):
+            await message.answer(
+                "⚠️ URL должен указывать на изображение.\n"
+                "Допустимые форматы: <code>.jpg</code>, <code>.jpeg</code>, "
+                "<code>.png</code>, <code>.gif</code>, <code>.webp</code>\n\n"
+                "Пример: <code>https://example.com/photo.jpg</code>",
+                parse_mode="HTML",
+            )
+            return
+
         try:
             config = await asyncio.to_thread(_load_config)
             if "bot" not in config:
@@ -1255,7 +1268,9 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         await state.clear()
         await message.answer(
             f"✅ Время напоминания: за <b>{hours} ч</b> до записи\n\n"
-            "<i>Применено немедленно.</i>",
+            "<i>Применено немедленно к новым записям.</i>\n"
+            "⚠️ <i>Уже запланированные напоминания (в APScheduler) не изменятся — "
+            "они будут отправлены согласно прежнему значению.</i>",
             reply_markup=AdminKeyboard.main_menu(),
             parse_mode="HTML",
         )
@@ -1624,24 +1639,35 @@ def setup_admin_router(container: Container) -> Router:  # noqa: C901
         action = data.get("blacklist_action", "block")
         text = message.text.strip()
 
-        if text.isdigit():
-            user_id = int(text)
-            try:
-                if action == "block":
-                    await asyncio.to_thread(appt_service.add_to_blacklist, user_id)
-                    await message.answer(MessageFormatter.blacklist_user_added(user_id), reply_markup=AdminKeyboard.main_menu())
-                else:
-                    await asyncio.to_thread(appt_service.remove_from_blacklist, user_id)
-                    await message.answer(MessageFormatter.blacklist_user_removed(user_id), reply_markup=AdminKeyboard.main_menu())
-            except Exception as exc:
-                logger.error("Ошибка изменения черного списка: %s", exc)
-                await message.answer(f"❌ Ошибка: {exc}")
-        else:
+        # BUG 20 FIX: корректная валидация Telegram ID — положительное целое число
+        try:
+            uid_val = int(text)
+            if uid_val <= 0:
+                raise ValueError("Telegram ID должен быть положительным числом")
+        except ValueError:
             await message.answer(
-                "⚠️ Введите числовой Telegram ID пользователя."
-                "\n\nЧтобы найти ID — используйте раздел «👥 Клиенты» → «Найти клиента»."
+                "❌ Введите корректный числовой Telegram ID (положительное целое число).\n\n"
+                "Чтобы найти ID — используйте раздел «👥 Клиенты» → «Найти клиента»."
             )
             return
+
+        user_id = uid_val
+        try:
+            if action == "block":
+                await asyncio.to_thread(appt_service.add_to_blacklist, user_id)
+                await message.answer(
+                    MessageFormatter.blacklist_user_added(user_id),
+                    reply_markup=AdminKeyboard.main_menu(),
+                )
+            else:
+                await asyncio.to_thread(appt_service.remove_from_blacklist, user_id)
+                await message.answer(
+                    MessageFormatter.blacklist_user_removed(user_id),
+                    reply_markup=AdminKeyboard.main_menu(),
+                )
+        except Exception as exc:
+            logger.error("Ошибка изменения черного списка: %s", exc)
+            await message.answer(f"❌ Ошибка: {exc}")
         await state.clear()
 
     # ════════════════════════════════════════════════════════════════════

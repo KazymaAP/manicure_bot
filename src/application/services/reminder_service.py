@@ -7,7 +7,10 @@ src/application/services/reminder_service.py — Сервис напоминан
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -310,15 +313,14 @@ class ReminderService:
 
         FIXED БАГ-ВЫСОК-04: реализовано реальное архивирование — экспорт в CSV и удаление
         старых отменённых/завершённых записей из БД. Ранее только логировалось количество.
+        BUG 12 FIX: убраны вложенные import asyncio, csv, io, os, date, timedelta —
+        asyncio уже импортирован в начале модуля.
         """
         try:
-            import asyncio
-            import csv
-            import io
-            import os
             from datetime import date as _date
             from datetime import timedelta
 
+            # BUG 12 FIX: csv, io, os уже импортированы в начале модуля
             cutoff_date = (_date.today() - timedelta(days=90)).isoformat()
             all_appts = await asyncio.to_thread(self._appointment_service.get_all)
             old_cancelled = [
@@ -371,9 +373,10 @@ class ReminderService:
         FIXED BUG-H2: используем self._schedule_service (публичный API) вместо
         нарушения инкапсуляции через getattr(self._appointment_service, "_schedule_repo", None).
         Если schedule_service не передан — graceful fallback с предупреждением.
+        BUG 12 FIX: убраны вложенные import asyncio, date, timedelta —
+        asyncio уже импортирован в начале модуля.
         """
         try:
-            import asyncio
             from datetime import date as _date
             from datetime import timedelta
 
@@ -454,9 +457,11 @@ class ReminderService:
         logger.info("Daily backup scheduled at %02d:%02d %s", hour, minute, self._timezone)
 
     async def _daily_digest_job(self) -> None:
-        """Отправляет ежедневный дайджест администраторам."""
+        """Отправляет ежедневный дайджест администраторам.
+
+        BUG 12 FIX: убран вложенный import asyncio — asyncio уже импортирован в начале модуля.
+        """
         try:
-            import asyncio
             from datetime import date as _date
 
             stats = await asyncio.to_thread(self._appointment_service.get_statistics)
@@ -487,12 +492,12 @@ class ReminderService:
 
         FIXED M-02: убран антипаттерн __import__("asyncio").
         asyncio уже импортирован в начале модуля — используем его напрямую.
+        BUG 12 FIX: вложенный import asyncio убран полностью.
         """
         try:
             if not self._backup_service:
                 logger.warning("BackupService not available")
                 return
-            import asyncio
             backup_path = await asyncio.to_thread(self._backup_service.create_backup)
             if backup_path:
                 logger.info("Daily backup completed: %s", backup_path)

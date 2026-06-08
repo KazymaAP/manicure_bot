@@ -19,6 +19,8 @@ SQLAlchemy==2.0.36
 aiohttp>=3.9.0
 # tzdata для корректной работы ZoneInfo на Linux/Docker без встроенной tz-базы
 tzdata==2024.2
+# BUG 32 FIX: backports.zoneinfo для Python < 3.9 (используется в reminder_service.py)
+backports.zoneinfo; python_version < "3.9"
 
 # ── Тестовые зависимости ─────────────────────────────────────────────────────
 pytest==8.3.4
