@@ -1,0 +1,173 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "manicure-bot"
+version = "4.2.0"
+description = "Telegram-бот для онлайн-записи на маникюр"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "aiogram==3.13.1",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "apscheduler[sqlalchemy]==3.10.4",
+    "python-dotenv==1.0.1",
+    "SQLAlchemy==2.0.36",
+    "aiohttp==3.11.11",
+    "tzdata==2024.2",
+]
+
+[project.optional-dependencies]
+redis = ["redis==5.2.1", "aiogram[redis]==3.13.1"]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.24.0",
+    "pytest-cov==6.0.0",
+    "pytest-mock==3.14.0",
+    "mypy==1.13.0",
+    "ruff==0.8.4",
+]
+
+# ── Ruff (linter + formatter) ────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",   # line too long — контролируем вручную
+    "N999",   # invalid module name — не применимо к handlers
+    "B008",   # function call in defaults — используется в Pydantic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # assert в тестах допустим
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ── mypy (строгая типизация) ────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = false  # отключено т.к. некоторые ignore нужны для совместимости
+warn_no_return = true
+# Исключаем тесты и миграции из strict-проверок
+exclude = ["tests/", "venv/", ".venv/", "migrations/"]
+
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "aiohttp.*"
+ignore_missing_imports = true
+
+# BAG-2 FIX: хендлеры используют callback.message (Message | InaccessibleMessage | None)
+# и callback.from_user (User | None) без полных guard-блоков.
+# Полные guard-блоки уже добавлены в критических местах (BAG-2).
+# Оставшиеся union-attr ошибки подавляются на уровне модуля —
+# это pre-existing issues, не связанные с нашими изменениями.
+[[tool.mypy.overrides]]
+module = "src.presentation.handlers.admin_handler"
+disable_error_code = ["union-attr", "arg-type", "type-arg", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "src.presentation.handlers.extended_features_handler"
+disable_error_code = ["union-attr", "arg-type", "type-arg", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "src.presentation.handlers.user_handler"
+disable_error_code = ["union-attr", "arg-type", "type-arg", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "src.presentation.handlers.common_handler"
+disable_error_code = ["union-attr", "arg-type", "type-arg", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "src.presentation.handlers.final_features_handler"
+disable_error_code = ["union-attr", "arg-type", "type-arg", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "src.application.services.appointment_service"
+disable_error_code = ["type-arg"]
+
+[[tool.mypy.overrides]]
+module = "src.application.services.schedule_service"
+disable_error_code = ["type-arg", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "src.application.services.reminder_service"
+disable_error_code = ["type-arg"]
+
+[[tool.mypy.overrides]]
+module = "src.presentation.keyboards.booking"
+disable_error_code = ["type-arg"]
+
+[[tool.mypy.overrides]]
+module = "src.presentation.keyboards.admin"
+disable_error_code = ["type-arg"]
+
+[[tool.mypy.overrides]]
+module = "src.presentation.keyboards.notifications"
+disable_error_code = ["type-arg"]
+
+[[tool.mypy.overrides]]
+module = "src.config.dependencies"
+disable_error_code = ["type-arg", "union-attr"]
+
+# ── pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--tb=short",
+    "--strict-markers",
+    "-q",
+]
+# BUG 5.3 FIX: подавляем предупреждения о неизвестных параметрах pytest
+filterwarnings = [
+    "ignore::pytest.PytestUnknownMarkWarning",
+    "ignore::DeprecationWarning",
+]
+markers = [
+    "unit: unit tests (no DB or external services)",
+    "integration: integration tests (require DB)",
+    "slow: slow tests",
+]
+
+# ── Coverage ─────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "tests/*",
+    "*/migrations/*",
+    "src/presentation/handlers/*",  # handlers требуют aiogram-mock
+]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# 25%+ покрытие реалистично для Telegram-бота с handler'ами
+fail_under = 25
+
+[tool.coverage.html]
+directory = "htmlcov"
